@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bookmark Sorter</title>
+  <style>
+    :root {
+      --bg: #15202b;
+      --surface: #192734;
+      --surface-hover: #22303c;
+      --input: #253341;
+      --border: #38444d;
+      --text: #e7e9ea;
+      --muted: #8899a6;
+      --accent: #1d9bf0;
+      --accent-soft: rgba(29, 155, 240, 0.12);
+      --keep: #00ba7c;
+      --danger: #f4212e;
+      --danger-soft: rgba(244, 33, 46, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { color-scheme: dark; }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    #app {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 16px 24px 40px;
+    }
+
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .counts {
+      display: flex;
+      gap: 16px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .counts strong {
+      color: var(--text);
+      font-size: 18px;
+      font-variant-numeric: tabular-nums;
+      margin-left: 4px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-left: auto;
+    }
+
+    .view-tabs {
+      display: flex;
+      gap: 0;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .tab-btn {
+      padding: 8px 18px;
+      border: 0;
+      background: var(--surface);
+      color: var(--muted);
+      cursor: pointer;
+      font: inherit;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .tab-btn + .tab-btn { border-left: 1px solid var(--border); }
+    .tab-btn.active { background: var(--accent); color: #fff; }
+
+    .danger-btn {
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .danger-btn:hover {
+      border-color: rgba(244, 33, 46, 0.45);
+      background: var(--danger-soft);
+      color: var(--danger);
+    }
+
+    .card {
+      margin-top: 20px;
+      padding: 20px 22px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+    }
+
+    .card.confirm-discard {
+      border-color: var(--danger);
+      outline: 2px solid var(--danger);
+    }
+
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .author {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 6px;
+      min-width: 0;
+      font-size: 15px;
+      font-weight: 400;
+    }
+
+    .author-name {
+      color: var(--text);
+      font-weight: 700;
+    }
+
+    .author-meta {
+      color: var(--muted);
+      font-weight: 400;
+      font-size: 14px;
+    }
+
+    .text {
+      font-size: 18px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .text a,
+    .kept-text a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .text a:hover,
+    .kept-text a:hover {
+      text-decoration: underline;
+    }
+
+    .link-preview-wrap {
+      margin-top: 12px;
+    }
+
+    .link-preview-wrap:empty { display: none; }
+
+    .link-preview {
+      display: flex;
+      flex-direction: row-reverse;
+      align-items: stretch;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: var(--bg);
+      color: inherit;
+      text-decoration: none;
+      min-height: 96px;
+    }
+
+    .link-preview:hover {
+      background: var(--surface-hover);
+      border-color: #3d5466;
+      text-decoration: none;
+    }
+
+    .link-preview-image {
+      width: 120px;
+      min-height: 96px;
+      object-fit: cover;
+      flex-shrink: 0;
+      background: #000;
+    }
+
+    .link-preview-body {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 4px;
+      padding: 12px 14px;
+    }
+
+    .link-preview-domain {
+      color: var(--muted);
+      font-size: 13px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .link-preview-title {
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.4;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+
+    .kept-row .link-preview {
+      min-height: 72px;
+    }
+
+    .kept-row .link-preview-image {
+      width: 72px;
+      min-height: 72px;
+    }
+
+    .kept-row .link-preview-title {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .images {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .images:empty,
+    .images[data-count="0"] { display: none; }
+
+    .images img {
+      max-width: 100%;
+      max-height: 320px;
+      width: auto;
+      height: auto;
+      object-fit: contain;
+      border-radius: 8px;
+      background: #000;
+    }
+
+    .images[data-count="2"] img,
+    .images[data-count="3"] img,
+    .images[data-count="4"] img {
+      max-width: calc(50% - 4px);
+      max-height: 240px;
+    }
+
+    .open-link,
+    .kept-open {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      width: 32px;
+      height: 32px;
+      flex-shrink: 0;
+      border-radius: 999px;
+      color: var(--accent);
+      text-decoration: none;
+      opacity: 0.85;
+    }
+
+    .open-link:hover,
+    .kept-open:hover {
+      background: var(--accent-soft);
+      opacity: 1;
+      text-decoration: none;
+    }
+
+    .open-link svg,
+    .kept-open svg,
+    .folder-delete svg {
+      width: 16px;
+      height: 16px;
+      display: block;
+    }
+
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .discard-hint {
+      display: none;
+      margin: 16px 0 0;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #3a1518;
+      color: #ffb4b8;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .card.confirm-discard .discard-hint { display: block; }
+
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      margin-top: 20px;
+      align-items: end;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .field > span {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    select, input[type="text"], input[type="search"] {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--input);
+      color: var(--text);
+      font: inherit;
+      font-size: 15px;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+
+    select {
+      border-radius: 10px;
+      padding-right: 36px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238899a6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      background-size: 16px;
+    }
+
+    ::placeholder {
+      color: var(--muted);
+      opacity: 1;
+    }
+
+    select:focus, input:focus, button:focus-visible, .tab-btn:focus-visible, .open-link:focus-visible, .text a:focus-visible, .kept-text a:focus-visible, .link-preview:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .action-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 48px;
+      padding: 12px;
+      border-radius: 10px;
+      border: 2px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font: inherit;
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .action-btn.discard { color: #ff8a90; border-color: var(--danger); }
+    .action-btn.discard:hover,
+    .action-btn.discard.armed { background: var(--danger); color: #fff; }
+    .action-btn.keep { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .action-btn.keep:hover { filter: brightness(1.08); }
+    .action-btn.skip:hover { background: var(--input); }
+
+    kbd {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 1.6em;
+      padding: 2px 7px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--input);
+      color: var(--text);
+      font: 13px ui-monospace, Consolas, monospace;
+    }
+
+    .guide {
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .empty-state {
+      margin: 0;
+      padding: 36px 12px;
+      text-align: center;
+    }
+
+    .empty-icon { font-size: 28px; margin-bottom: 8px; }
+    .empty-title { margin: 0; font-size: 20px; font-weight: 700; }
+    .empty-sub { margin: 8px 0 0; color: var(--muted); font-size: 15px; }
+
+    .kept-layout {
+      display: grid;
+      grid-template-columns: 260px minmax(0, 1fr);
+      gap: 16px;
+      margin-top: 20px;
+      align-items: start;
+    }
+
+    .folder-pane {
+      padding: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+    }
+
+    .folder-pane h2 {
+      margin: 0 0 10px;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--muted);
+    }
+
+    .folder-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin: 0 0 12px;
+      padding: 0;
+      list-style: none;
+    }
+
+    .folder-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .folder-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      min-width: 0;
+      padding: 10px 14px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      font: inherit;
+      font-size: 15px;
+      text-align: left;
+    }
+
+    .folder-item:hover { background: var(--input); }
+    .folder-item.active { background: var(--accent); color: #fff; }
+    .folder-item.active:hover { background: #1a8cd8; }
+
+    .folder-item-name {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .folder-item-count {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      font-size: 13px;
+    }
+
+    .folder-item.active .folder-item-count {
+      color: inherit;
+      opacity: 0.85;
+    }
+
+    .folder-delete {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      opacity: 0;
+      flex-shrink: 0;
+    }
+
+    .folder-row:hover .folder-delete,
+    .folder-row:focus-within .folder-delete {
+      opacity: 0.7;
+    }
+
+    .folder-delete:hover,
+    .folder-delete:focus-visible {
+      opacity: 1;
+      color: var(--danger);
+      background: var(--danger-soft);
+    }
+
+    @media (hover: none) {
+      .folder-delete { opacity: 0.55; }
+    }
+
+    .add-folder-form {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 6px;
+    }
+
+    .add-folder-form button {
+      padding: 10px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--input);
+      color: var(--text);
+      cursor: pointer;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .kept-main { min-width: 0; }
+
+    .kept-search {
+      margin-bottom: 16px;
+    }
+
+    .kept-search input[type="search"] {
+      background: var(--input);
+      border-color: transparent;
+      padding: 12px 16px;
+    }
+
+    .kept-search input[type="search"]:hover,
+    .kept-search input[type="search"]:focus {
+      background: #273340;
+    }
+
+    .kept-heading {
+      margin: 0 0 12px;
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .kept-folder-badge {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--input);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .kept-list {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
+    .kept-more {
+      display: block;
+      width: 100%;
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font: inherit;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .kept-more:hover {
+      background: var(--surface-hover);
+    }
+
+    .kept-more[hidden] { display: none; }
+
+    .kept-row {
+      padding: 16px 18px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      cursor: pointer;
+      transition: background 0.12s ease, border-color 0.12s ease;
+    }
+
+    .kept-row:hover {
+      background: var(--surface-hover);
+      border-color: #3d5466;
+    }
+
+    .kept-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .kept-text {
+      margin-top: 8px;
+      font-size: 15px;
+      line-height: 1.6;
+      color: var(--text);
+      display: -webkit-box;
+      -webkit-line-clamp: 4;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .kept-edit {
+      margin-top: 12px;
+    }
+
+    .kept-edit select {
+      padding: 8px 32px 8px 10px;
+      font-size: 13px;
+      color: var(--muted);
+      background-color: var(--input);
+      border-color: transparent;
+    }
+
+    @media (min-width: 900px) {
+      .kept-list { grid-template-columns: 1fr 1fr; }
+    }
+
+    @media (max-width: 800px) {
+      .kept-layout { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 700px) {
+      #app { padding: 12px 14px 32px; }
+      .header-actions { margin-left: 0; width: 100%; justify-content: space-between; }
+      .actions { grid-template-columns: 1fr; }
+      .images[data-count="2"] img,
+      .images[data-count="3"] img,
+      .images[data-count="4"] img {
+        max-width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>Bookmark Sorter</h1>
+      <div class="counts">
+        <span>未整理<strong id="remaining-count">0</strong></span>
+        <span>保存済み<strong id="kept-count">0</strong></span>
+      </div>
+      <div class="header-actions">
+        <div class="view-tabs">
+          <button type="button" id="tab-sort" class="tab-btn active">選別</button>
+          <button type="button" id="tab-kept" class="tab-btn">保存済み</button>
+        </div>
+        <button type="button" id="clear-all-btn" class="danger-btn">データを全消去</button>
+      </div>
+    </header>
+
+    <main>
+      <section id="sort-view">
+        <article class="card" id="tweet-card">
+          <div id="card-empty" class="empty-state" hidden>
+            <div class="empty-icon">✓</div>
+            <p class="empty-title">選別が完了しました</p>
+            <p class="empty-sub">保存済みタブのフォルダから見返せます</p>
+          </div>
+          <div id="card-body">
+            <div class="card-head">
+              <div class="author" id="card-author">読み込み中...</div>
+              <a id="card-open-link" class="open-link" href="#" target="_blank" rel="noopener noreferrer" title="Twitterで開く（O）">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M14 5h5v5"/>
+                  <path d="M20 4l-9 9"/>
+                  <path d="M11 5H6a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5"/>
+                </svg>
+                <span class="visually-hidden">Twitterで開く（O）</span>
+              </a>
+            </div>
+            <div class="text" id="card-text"></div>
+            <div class="images" id="card-images" data-count="0"></div>
+            <div class="link-preview-wrap" id="card-link-preview"></div>
+            <p id="discard-hint" class="discard-hint">もう一度 ← を押すと削除します（Esc でキャンセル）</p>
+            <div class="controls">
+              <label class="field">
+                <span>保存先フォルダ（1–9）</span>
+                <select id="folder-select">
+                  <option value="未分類" selected>1  未分類</option>
+                </select>
+              </label>
+              <form id="sort-add-folder-form" class="add-folder-form">
+                <input id="sort-add-folder-input" type="text" maxlength="40" placeholder="新しいフォルダ名" />
+                <button type="submit">追加</button>
+              </form>
+            </div>
+          </div>
+        </article>
+
+        <div class="actions" id="sort-actions" hidden>
+          <button type="button" id="btn-discard" class="action-btn discard">削除 <kbd>←</kbd></button>
+          <button type="button" id="btn-skip" class="action-btn skip">スキップ <kbd>↓</kbd></button>
+          <button type="button" id="btn-keep" class="action-btn keep">保存 <kbd>→</kbd></button>
+        </div>
+
+        <p class="guide">Z: 取り消し　／　1–9: フォルダ　／　フォルダ選択中は Enter で保存　／　新しいフォルダ名は Enter で追加　／　削除は ← を2回</p>
+      </section>
+
+      <section id="kept-view" hidden>
+        <div class="kept-layout">
+          <aside class="folder-pane">
+            <h2>フォルダ</h2>
+            <ul id="folder-list" class="folder-list"></ul>
+            <form id="add-folder-form" class="add-folder-form">
+              <input id="add-folder-input" type="text" maxlength="40" placeholder="新しいフォルダ名" />
+              <button type="submit">追加</button>
+            </form>
+          </aside>
+          <div class="kept-main">
+            <label class="field kept-search">
+              <span>ツイートを検索</span>
+              <input id="kept-search" type="search" placeholder="本文・投稿者名" />
+            </label>
+            <h2 id="kept-heading" class="kept-heading">未分類</h2>
+            <div id="kept-empty" class="empty-state card" hidden>
+              <p class="empty-title">保存済みはまだありません</p>
+              <p class="empty-sub">選別タブで → を押すとここに溜まります</p>
+            </div>
+            <div id="kept-list" class="kept-list"></div>
+            <button type="button" id="kept-more" class="kept-more" hidden>さらに表示</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="/src/dashboard.ts"></script>
+</body>
+</html>

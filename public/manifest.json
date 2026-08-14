@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "X Bookmark Sorter",
+  "version": "1.0.0",
+  "description": "Twitterのブックマークをローカルに収集し、フォルダ分けして整理するツールです。",
+  "permissions": [
+    "storage",
+    "unlimitedStorage"
+  ],
+  "action": {
+    "default_title": "X Bookmark Sorter"
+  },
+  "host_permissions": [
+    "https://x.com/*",
+    "https://twitter.com/*"
+  ],
+  "background": {
+    "service_worker": "assets/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ],
+      "js": ["content-loader.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["assets/content.js", "assets/constants-*.js"],
+      "matches": ["https://x.com/*", "https://twitter.com/*"]
+    }
+  ]
+}
