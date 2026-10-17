@@ -1,5 +1,5 @@
 import { DEFAULT_FOLDER, type BookmarkPost } from './db';
-import type { BookmarkChanges, ExtensionRequest, FolderInfo } from './messages';
+import type { BookmarkChanges, ExportData, ExtensionRequest, FolderInfo, UnbookmarkFailure } from './messages';
 import { isHttpUrl } from './urls';
 
 type ViewMode = 'sort' | 'kept';
@@ -896,6 +896,68 @@ async function clearAllData(): Promise<void> {
   if (viewMode === 'kept') await loadKeptView();
 }
 
+async function updateUnbookmarkFailures(): Promise<void> {
+  const btn = document.getElementById('unbookmark-failed-btn');
+  if (!btn) return;
+  const { failures } = await sendMessage<{ failures: UnbookmarkFailure[] }>({ action: 'list_unbookmark_failures' });
+  btn.hidden = failures.length === 0;
+  btn.innerText = `解除失敗 ${failures.length}件 · 再試行`;
+}
+
+async function retryUnbookmarkFailures(): Promise<void> {
+  const { queued } = await sendMessage<{ queued: number }>({ action: 'retry_unbookmark_failures' });
+  await updateUnbookmarkFailures();
+  window.alert(queued > 0 ? `${queued}件の解除を再試行します` : '再試行が必要なポストはありません');
+}
+
+function localDateStamp(date: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
+}
+
+async function exportAllData(): Promise<void> {
+  const data = await sendMessage<ExportData>({ action: 'export_data' });
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `bookmark-sorter-${localDateStamp(new Date())}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+async function importFromFile(file: File): Promise<void> {
+  let data: unknown;
+  try {
+    data = JSON.parse(await file.text());
+  } catch {
+    window.alert('JSON として読み込めませんでした');
+    return;
+  }
+
+  const confirmed = confirm(
+    'ファイルの内容を読み込みます。同じポストがすでにある場合は、ファイルの内容（状態・フォルダ）で上書きします。よろしいですか？'
+  );
+  if (!confirmed) return;
+
+  const response = await sendMessage<{ ok: boolean; error?: string; imported: number }>({
+    action: 'import_data',
+    data
+  });
+  if (!response.ok) {
+    window.alert(response.error || 'インポートできませんでした');
+    return;
+  }
+
+  resetLocalState();
+  await loadFolders();
+  await loadNextPost();
+  if (viewMode === 'kept') await loadKeptView();
+  window.alert(`${response.imported}件を読み込みました`);
+}
+
 async function runExclusive(task: () => Promise<void>): Promise<void> {
   if (isBusy) return;
   isBusy = true;
@@ -922,6 +984,35 @@ document.getElementById('tab-kept')?.addEventListener('click', () => setView('ke
 document.getElementById('clear-all-btn')?.addEventListener('click', () => {
   void runExclusive(clearAllData);
 });
+
+document.getElementById('unbookmark-failed-btn')?.addEventListener('click', () => {
+  void runExclusive(retryUnbookmarkFailures);
+});
+
+document.getElementById('export-btn')?.addEventListener('click', () => {
+  void runExclusive(exportAllData);
+});
+
+document.getElementById('import-btn')?.addEventListener('click', () => {
+  document.getElementById('import-file')?.click();
+});
+
+document.getElementById('import-file')?.addEventListener('change', (e) => {
+  const input = e.target;
+  if (!(input instanceof HTMLInputElement)) return;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  void runExclusive(() => importFromFile(file));
+});
+
+// 解除キューは background で進むので、失敗件数はときどき取り直す
+setInterval(() => {
+  if (document.hidden) return;
+  void updateUnbookmarkFailures().catch((error: unknown) => {
+    if (!isContextInvalidatedError(error)) console.error(error);
+  });
+}, 10_000);
 
 document.getElementById('card-open-link')?.addEventListener('click', (e) => {
   e.preventDefault();
@@ -1044,6 +1135,9 @@ document.getElementById('kept-list')?.addEventListener('change', (e) => {
 
 document.addEventListener('keydown', (e: KeyboardEvent) => {
   if (viewMode !== 'sort' || isBusy) return;
+  // 押しっぱなしのリピートで ← の2回押し確認をすり抜けないようにする。
+  // 修飾キー付き（Ctrl+1 のタブ切替など）はブラウザに任せる。
+  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
 
   const activeEl = document.activeElement;
   const isInputActive = activeEl instanceof HTMLInputElement || activeEl instanceof HTMLSelectElement;
@@ -1128,6 +1222,7 @@ void loadFolders()
       const sortSelect = document.getElementById('folder-select') as HTMLSelectElement | null;
       if (sortSelect) sortSelect.value = last;
     }
+    await updateUnbookmarkFailures();
     return loadNextPost();
   })
   .catch((error: unknown) => {
