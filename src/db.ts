@@ -12,6 +12,8 @@ export interface BookmarkPost {
   folder: string;
   status: 'unprocessed' | 'kept' | 'discarded';
   savedAt: string;
+  /** 元ポストの投稿日時（ISO 文字列）。古いデータには無い */
+  postedAt?: string;
   linkCard?: {
     url: string;
     title?: string;
@@ -52,6 +54,10 @@ export class BookmarkDatabase extends Dexie {
       });
     this.version(4).stores({
       bookmarks: 'id, folder, status, savedAt, [status+savedAt]',
+      folders: 'name'
+    });
+    this.version(5).stores({
+      bookmarks: 'id, folder, status, savedAt, [status+savedAt], [status+folder]',
       folders: 'name'
     });
   }

@@ -8,11 +8,28 @@ export interface FolderInfo {
   locked: boolean;
 }
 
+export interface UnbookmarkFailure {
+  url: string;
+  failedAt: string;
+}
+
+export interface ExportData {
+  format: 'x-bookmark-sorter';
+  version: 1;
+  exportedAt: string;
+  bookmarks: BookmarkPost[];
+  folders: string[];
+}
+
 export type ExtensionRequest =
   | { action: 'save_posts'; posts: BookmarkPost[] }
   | { action: 'unbookmark'; tweetUrl: string }
   | { action: 'cancel_unbookmark'; tweetUrl: string }
-  | { action: 'unbookmark_done' }
+  | { action: 'unbookmark_done'; ok?: boolean }
+  | { action: 'list_unbookmark_failures' }
+  | { action: 'retry_unbookmark_failures' }
+  | { action: 'export_data' }
+  | { action: 'import_data'; data: unknown }
   | { action: 'get_unprocessed'; excludeIds?: string[]; limit?: number }
   | { action: 'update_bookmark'; id: string; changes: BookmarkChanges }
   | { action: 'get_counts' }
@@ -28,6 +45,10 @@ const ACTIONS: ReadonlySet<ExtensionRequest['action']> = new Set([
   'unbookmark',
   'cancel_unbookmark',
   'unbookmark_done',
+  'list_unbookmark_failures',
+  'retry_unbookmark_failures',
+  'export_data',
+  'import_data',
   'get_unprocessed',
   'update_bookmark',
   'get_counts',

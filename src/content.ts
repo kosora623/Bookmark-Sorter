@@ -75,7 +75,11 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// urls.ts と同じ値。content script は web_accessible_resources に載せたチャンクしか
+// import できないため、urls.ts（Dexie と同じチャンクに入る）は読み込まずに複製している。
 const PENDING_UNBOOKMARK_KEY = 'pendingUnbookmark';
+const UNBOOKMARK_FIND_TIMEOUT_MS = 10_000;
+const UNBOOKMARK_CONFIRM_TIMEOUT_MS = 6_000;
 
 function isNestedTweet(el: HTMLElement): boolean {
   if (el.closest('[data-testid="quoteTweet"]')) return true;
@@ -134,12 +138,26 @@ async function isPendingUnbookmark(): Promise<boolean> {
   }
 }
 
+async function waitForBookmarkCleared(deadline: number): Promise<boolean> {
+  while (Date.now() < deadline) {
+    if (!isExtensionAlive()) return false;
+    const tweetEl = findPrimaryTweet();
+    // ボタンが「ブックマークに追加」へ切り替われば、X 側の解除リクエストが通っている
+    if (tweetEl && !findRemoveBookmarkButton(tweetEl) && queryOwn(tweetEl, '[data-testid="bookmark"]')) {
+      return true;
+    }
+    await sleep(200);
+  }
+  return false;
+}
+
 async function tryAutoUnbookmark(): Promise<void> {
   if (unbookmarkAttempted) return;
   if (!(await isPendingUnbookmark())) return;
   unbookmarkAttempted = true;
 
-  const deadline = Date.now() + 10_000;
+  let ok = false;
+  const deadline = Date.now() + UNBOOKMARK_FIND_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (!isExtensionAlive()) {
       teardown();
@@ -150,14 +168,19 @@ async function tryAutoUnbookmark(): Promise<void> {
       const removeBtn = findRemoveBookmarkButton(tweetEl);
       if (removeBtn) {
         removeBtn.click();
+        ok = await waitForBookmarkCleared(Date.now() + UNBOOKMARK_CONFIRM_TIMEOUT_MS);
         break;
       }
-      if (queryOwn(tweetEl, '[data-testid="bookmark"]')) break;
+      if (queryOwn(tweetEl, '[data-testid="bookmark"]')) {
+        // すでに解除済み
+        ok = true;
+        break;
+      }
     }
     await sleep(200);
   }
 
-  await sendRuntimeMessage({ action: 'unbookmark_done' });
+  await sendRuntimeMessage({ action: 'unbookmark_done', ok });
 }
 
 function createOverlayUI(): void {
@@ -371,6 +394,29 @@ function parseLinkCard(tweetEl: HTMLElement): BookmarkPost['linkCard'] | undefin
   return card;
 }
 
+/**
+ * innerText だと絵文字（<img alt>）が消え、URL は「example.com/…」に省略される。
+ * DOM をたどって絵文字は alt、URL リンクは隠し部分を含む全文で組み立てる。
+ */
+function extractTweetText(root: Node): string {
+  let out = '';
+  for (const node of Array.from(root.childNodes)) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      out += node.textContent ?? '';
+    } else if (node instanceof HTMLImageElement) {
+      out += node.alt;
+    } else if (node instanceof HTMLBRElement) {
+      out += '\n';
+    } else if (node instanceof HTMLAnchorElement) {
+      const full = (node.textContent ?? '').replace(/…$/, '').trim();
+      out += /^https?:\/\/\S+$/.test(full) ? full : extractTweetText(node);
+    } else if (node instanceof HTMLElement) {
+      out += extractTweetText(node);
+    }
+  }
+  return out;
+}
+
 function parseTweetElement(tweetEl: HTMLElement): BookmarkPost | null {
   try {
     const timeEl = queryOwn(tweetEl, 'time');
@@ -385,7 +431,9 @@ function parseTweetElement(tweetEl: HTMLElement): BookmarkPost | null {
     const author = userEl ? userEl.innerText.replace(/\n/g, ' ') : '不明';
 
     const textEl = queryOwn<HTMLElement>(tweetEl, '[data-testid="tweetText"]');
-    const text = textEl ? textEl.innerText : '';
+    const text = textEl ? extractTweetText(textEl) : '';
+
+    const postedAt = timeEl?.getAttribute('datetime') ?? undefined;
 
     const images: string[] = [];
     for (const img of queryOwnAll<HTMLImageElement>(tweetEl, '[data-testid="tweetPhoto"] img')) {
@@ -406,6 +454,7 @@ function parseTweetElement(tweetEl: HTMLElement): BookmarkPost | null {
       savedAt: new Date().toISOString()
     };
     if (linkCard) post.linkCard = linkCard;
+    if (postedAt && !Number.isNaN(Date.parse(postedAt))) post.postedAt = postedAt;
     return post;
   } catch (err) {
     console.error('ポスト解析エラー:', err);
@@ -514,7 +563,7 @@ async function startAutoCollect(): Promise<void> {
 
 function isBookmarksPage(): boolean {
   const path = window.location.pathname.replace(/\/+$/, '') || '/';
-  return path === '/i/history' || path.startsWith('/i/history/') || path.includes('/bookmarks');
+  return ['/i/history', '/i/bookmarks'].some((base) => path === base || path.startsWith(`${base}/`));
 }
 
 function checkPage(): void {
