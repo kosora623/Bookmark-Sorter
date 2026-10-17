@@ -70,6 +70,7 @@
 
     .header-actions {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
       gap: 10px;
       margin-left: auto;
@@ -112,6 +113,29 @@
     .danger-btn:hover {
       border-color: rgba(244, 33, 46, 0.45);
       background: var(--danger-soft);
+      color: var(--danger);
+    }
+
+    .sub-btn {
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .sub-btn:hover {
+      border-color: rgba(29, 155, 240, 0.45);
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .sub-btn.warn {
+      border-color: rgba(244, 33, 46, 0.45);
       color: var(--danger);
     }
 
@@ -710,6 +734,10 @@
           <button type="button" id="tab-sort" class="tab-btn active">選別</button>
           <button type="button" id="tab-kept" class="tab-btn">保存済み</button>
         </div>
+        <button type="button" id="unbookmark-failed-btn" class="sub-btn warn" hidden title="Twitter 側のブックマーク解除に失敗したポストをもう一度解除します"></button>
+        <button type="button" id="export-btn" class="sub-btn" title="すべてのデータを JSON ファイルに保存します">エクスポート</button>
+        <button type="button" id="import-btn" class="sub-btn" title="エクスポートした JSON ファイルから読み込みます">インポート</button>
+        <input type="file" id="import-file" accept="application/json,.json" hidden />
         <button type="button" id="clear-all-btn" class="danger-btn">データを全消去</button>
       </div>
     </header>
