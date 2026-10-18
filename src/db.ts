@@ -1,5 +1,6 @@
 import { Dexie, type Table } from 'dexie';
 import { DEFAULT_FOLDER } from './constants';
+import { normalizeImageUrls } from './urls';
 
 export { DEFAULT_FOLDER };
 
@@ -14,6 +15,8 @@ export interface BookmarkPost {
   savedAt: string;
   /** 元ポストの投稿日時（ISO 文字列）。古いデータには無い */
   postedAt?: string;
+  /** 動画（GIF 含む）を含むか。動画本体は保存せず、サムネイルは images に入る */
+  hasVideo?: boolean;
   linkCard?: {
     url: string;
     title?: string;
@@ -64,6 +67,20 @@ export class BookmarkDatabase extends Dexie {
       bookmarks: 'id, folder, status, savedAt, [status+savedAt], [status+folder], [status+folder+savedAt]',
       folders: 'name'
     });
+    // 保存済みの画像 URL を大きいサイズに揃える（スキーマは v6 と同じ）
+    this.version(7)
+      .stores({
+        bookmarks: 'id, folder, status, savedAt, [status+savedAt], [status+folder], [status+folder+savedAt]',
+        folders: 'name'
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table('bookmarks')
+          .toCollection()
+          .modify((post: BookmarkPost) => {
+            if (Array.isArray(post.images)) post.images = normalizeImageUrls(post.images);
+          });
+      });
   }
 }
 
