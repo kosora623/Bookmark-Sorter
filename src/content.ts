@@ -8,6 +8,7 @@ const NORMAL_SCROLL_INTERVAL_MS = 1500;
 const SKIP_SCROLL_INTERVAL_MS = 280;
 const BOTTOM_DETECT_COUNT = 5;
 const SKIP_BOTTOM_DETECT_COUNT = 18;
+const PAGE_CHECK_FALLBACK_MS = 5000;
 
 let isCollecting = false;
 let isSkipMode = false;
@@ -18,6 +19,7 @@ let overlayCreated = false;
 let unbookmarkAttempted = false;
 let tornDown = false;
 let pageCheckTimer: ReturnType<typeof setInterval> | null = null;
+let titleObserver: MutationObserver | null = null;
 let collectTimer: ReturnType<typeof setTimeout> | null = null;
 
 function isContextInvalidatedError(error: unknown): boolean {
@@ -43,6 +45,9 @@ function teardown(): void {
     clearInterval(pageCheckTimer);
     pageCheckTimer = null;
   }
+  titleObserver?.disconnect();
+  titleObserver = null;
+  window.removeEventListener('popstate', checkPageIfNavigated);
   if (collectTimer !== null) {
     clearTimeout(collectTimer);
     collectTimer = null;
@@ -185,7 +190,7 @@ async function tryAutoUnbookmark(): Promise<void> {
 }
 
 function createOverlayUI(): void {
-  if (overlayCreated) return;
+  if (overlayCreated && document.getElementById('x-bm-sorter-overlay')) return;
 
   const existing = document.getElementById('x-bm-sorter-overlay');
   if (existing) existing.remove();
@@ -573,5 +578,20 @@ function checkPage(): void {
   }
 }
 
-checkPage();
-pageCheckTimer = setInterval(checkPage, 1000);
+// X は SPA なので、ページ遷移はタイトルの書き換えと popstate で拾う。
+// content script からは history.pushState を直接フックできない（ページ側の world で動くため）。
+let lastCheckedPath = '';
+
+function checkPageIfNavigated(): void {
+  if (location.pathname === lastCheckedPath) return;
+  lastCheckedPath = location.pathname;
+  checkPage();
+}
+
+titleObserver = new MutationObserver(checkPageIfNavigated);
+titleObserver.observe(document.head, { childList: true, subtree: true, characterData: true });
+window.addEventListener('popstate', checkPageIfNavigated);
+
+checkPageIfNavigated();
+// 取りこぼし（タイトルが変わらない遷移など）と拡張の再読み込み検知のための保険
+pageCheckTimer = setInterval(checkPage, PAGE_CHECK_FALLBACK_MS);
