@@ -21,11 +21,13 @@ const skippedIds = new Set<string>();
 const undoStack: UndoEntry[] = [];
 const postQueue: BookmarkPost[] = [];
 let refillPromise: Promise<void> | null = null;
+// 保存済みは「いま読み込んだページ分」だけを持つ。全件は background 側にある
 let keptPosts: BookmarkPost[] = [];
+let keptTotal = 0;
+let keptRequestId = 0;
 let folders: FolderInfo[] = [];
 let openFolder = DEFAULT_FOLDER;
 let searchQuery = '';
-let keptVisibleCount = KEPT_PAGE_SIZE;
 let discardArmedId: string | null = null;
 let discardArmTimer: ReturnType<typeof setTimeout> | null = null;
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -241,8 +243,9 @@ function resetLocalState(): void {
   undoStack.length = 0;
   postQueue.length = 0;
   keptPosts = [];
+  keptTotal = 0;
+  keptRequestId++;
   searchQuery = '';
-  keptVisibleCount = KEPT_PAGE_SIZE;
   openFolder = DEFAULT_FOLDER;
   if (searchTimer) {
     clearTimeout(searchTimer);
@@ -609,15 +612,10 @@ function populateFolderSelect(select: HTMLSelectElement, selected: string): void
   select.value = previous;
 }
 
-function recountFolders(): void {
-  const counts = new Map<string, number>();
-  for (const post of keptPosts) {
-    counts.set(post.folder, (counts.get(post.folder) ?? 0) + 1);
-  }
-  folders = folders.map((folder) => ({
-    ...folder,
-    count: counts.get(folder.name) ?? 0
-  }));
+function adjustFolderCount(name: string, delta: number): void {
+  folders = folders.map((folder) =>
+    folder.name === name ? { ...folder, count: Math.max(0, folder.count + delta) } : folder
+  );
 }
 
 function renderFolderList(): void {
@@ -665,24 +663,36 @@ function renderFolderList(): void {
   listEl.appendChild(fragment);
 }
 
-function visibleKeptPosts(): BookmarkPost[] {
-  const query = searchQuery.trim().toLowerCase();
-  if (query) {
-    return keptPosts.filter(
-      (post) => post.author.toLowerCase().includes(query) || post.text.toLowerCase().includes(query)
-    );
-  }
-  return keptPosts.filter((post) => post.folder === openFolder);
+/**
+ * 現在のフォルダ・検索条件で保存済みを読み込む。reset なら 1 ページ目から、そうでなければ続きを足す。
+ * 検索の連続入力などで古い応答が後から届いたら捨てる。
+ */
+async function loadKeptPage(reset: boolean): Promise<void> {
+  const requestId = ++keptRequestId;
+  const response = await sendMessage<{ posts: BookmarkPost[]; total: number }>({
+    action: 'list_kept',
+    folder: openFolder,
+    query: searchQuery,
+    offset: reset ? 0 : keptPosts.length,
+    limit: KEPT_PAGE_SIZE
+  });
+  if (requestId !== keptRequestId) return;
+
+  keptPosts = reset ? response.posts : [...keptPosts, ...response.posts];
+  keptTotal = response.total;
+  renderKeptList();
 }
 
-function resetKeptWindow(): void {
-  keptVisibleCount = KEPT_PAGE_SIZE;
+function reloadKeptList(): void {
+  void loadKeptPage(true).catch((error: unknown) => {
+    if (!isContextInvalidatedError(error)) console.error(error);
+  });
 }
 
-function updateKeptMore(total: number): void {
+function updateKeptMore(): void {
   const moreBtn = document.getElementById('kept-more') as HTMLButtonElement | null;
   if (!moreBtn) return;
-  const remaining = total - keptVisibleCount;
+  const remaining = keptTotal - keptPosts.length;
   moreBtn.hidden = remaining <= 0;
   if (remaining > 0) {
     moreBtn.innerText = `さらに表示（残り ${remaining}）`;
@@ -713,11 +723,9 @@ function renderKeptList(): void {
   if (!listEl || !emptyEl) return;
 
   const query = searchQuery.trim();
-  const posts = visibleKeptPosts();
-  const shown = posts.slice(0, keptVisibleCount);
 
   renderKeptHeading();
-  emptyEl.hidden = posts.length > 0;
+  emptyEl.hidden = keptPosts.length > 0;
   if (emptyTitle instanceof HTMLElement) {
     emptyTitle.innerText = query ? '一致するツイートはありません' : 'このフォルダは空です';
   }
@@ -731,7 +739,7 @@ function renderKeptList(): void {
   const fragment = document.createDocumentFragment();
   const showBadge = query.length > 0;
 
-  for (const post of shown) {
+  for (const post of keptPosts) {
     const row = document.createElement('div');
     row.className = 'kept-row';
     row.dataset.id = post.id;
@@ -784,21 +792,27 @@ function renderKeptList(): void {
   }
 
   listEl.appendChild(fragment);
-  updateKeptMore(posts.length);
+  updateKeptMore();
 }
 
-function applyKeptChanges(id: string, changes: BookmarkChanges): void {
+async function persistKeptFolder(id: string, folder: string): Promise<void> {
   const post = keptPosts.find((item) => item.id === id);
-  if (!post) return;
-  if (changes.folder !== undefined) post.folder = changes.folder;
-}
+  if (!post || post.folder === folder) return;
 
-function persistKeptFolder(id: string, folder: string): void {
-  applyKeptChanges(id, { folder });
-  recountFolders();
+  // DB を先に更新してから一覧を詰める。次ページの offset がずれないようにするため
+  await sendMessage({ action: 'update_bookmark', id, changes: { folder } });
+  adjustFolderCount(post.folder, -1);
+  adjustFolderCount(folder, 1);
+
+  if (searchQuery.trim()) {
+    // 検索結果は全フォルダ横断なので、行は残してバッジだけ変える
+    post.folder = folder;
+  } else {
+    keptPosts = keptPosts.filter((item) => item.id !== id);
+    keptTotal = Math.max(0, keptTotal - 1);
+  }
   renderFolderList();
   renderKeptList();
-  sendQuietly({ action: 'update_bookmark', id, changes: { folder } });
 }
 
 async function loadFolders(): Promise<void> {
@@ -813,15 +827,9 @@ async function loadFolders(): Promise<void> {
 }
 
 async function loadKeptView(): Promise<void> {
-  const [kept] = await Promise.all([
-    sendMessage<{ posts: BookmarkPost[] }>({ action: 'list_kept' }),
-    loadFolders()
-  ]);
-  keptPosts = kept.posts;
-  resetKeptWindow();
-  recountFolders();
+  await loadFolders();
   renderFolderList();
-  renderKeptList();
+  await loadKeptPage(true);
 }
 
 async function addFolderFromInput(input: HTMLInputElement | null, selectAfterAdd: boolean): Promise<void> {
@@ -850,7 +858,7 @@ async function addFolderFromInput(input: HTMLInputElement | null, selectAfterAdd
     populateFolderSelect(sortSelect, exists && selectAfterAdd ? addedName : sortSelect.value);
   }
   renderFolderList();
-  if (viewMode === 'kept') renderKeptList();
+  if (viewMode === 'kept') await loadKeptPage(true);
 }
 
 async function removeFolder(name: string): Promise<void> {
@@ -870,10 +878,6 @@ async function removeFolder(name: string): Promise<void> {
   folders = response.folders;
   if (openFolder === name) openFolder = DEFAULT_FOLDER;
 
-  const kept = await sendMessage<{ posts: BookmarkPost[] }>({ action: 'list_kept' });
-  keptPosts = kept.posts;
-  resetKeptWindow();
-
   const sortSelect = document.getElementById('folder-select') as HTMLSelectElement | null;
   if (sortSelect) {
     const nextFolder = sortSelect.value === name ? DEFAULT_FOLDER : sortSelect.value;
@@ -882,7 +886,7 @@ async function removeFolder(name: string): Promise<void> {
   }
 
   renderFolderList();
-  renderKeptList();
+  await loadKeptPage(true);
 }
 
 async function clearAllData(): Promise<void> {
@@ -1071,9 +1075,8 @@ document.getElementById('folder-list')?.addEventListener('click', (e) => {
   const searchInput = document.getElementById('kept-search') as HTMLInputElement | null;
   if (searchInput) searchInput.value = '';
   searchQuery = '';
-  resetKeptWindow();
   renderFolderList();
-  renderKeptList();
+  reloadKeptList();
 });
 
 document.getElementById('add-folder-form')?.addEventListener('submit', (e) => {
@@ -1102,14 +1105,12 @@ document.getElementById('kept-search')?.addEventListener('input', (e) => {
   if (searchTimer) clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
     searchQuery = target.value;
-    resetKeptWindow();
-    renderKeptList();
+    reloadKeptList();
   }, SEARCH_DEBOUNCE_MS);
 });
 
 document.getElementById('kept-more')?.addEventListener('click', () => {
-  keptVisibleCount += KEPT_PAGE_SIZE;
-  renderKeptList();
+  void runExclusive(() => loadKeptPage(false));
 });
 
 document.getElementById('kept-list')?.addEventListener('click', (e) => {
@@ -1130,7 +1131,12 @@ document.getElementById('kept-list')?.addEventListener('change', (e) => {
   const id = row instanceof HTMLElement ? row.dataset.id : undefined;
   if (!id) return;
 
-  persistKeptFolder(id, target.value);
+  if (isBusy) {
+    // 処理中で受け付けられないときは、プルダウンの表示を元に戻す
+    renderKeptList();
+    return;
+  }
+  void runExclusive(() => persistKeptFolder(id, target.value));
 });
 
 document.addEventListener('keydown', (e: KeyboardEvent) => {

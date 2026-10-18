@@ -124,6 +124,7 @@ x.com / i/history     dashboard (index.html)
 | `src/background.ts` | DB の読み書き、解除キュー、ダッシュボード起動 |
 | `src/db.ts` | `BookmarkPost` 型と Dexie スキーマ |
 | `src/messages.ts` | content / dashboard / background のメッセージ型 |
+| `src/kept-query.ts` | 保存済み一覧のページ取得・検索 |
 | `src/normalize.ts` | 受け取ったポスト・インポートデータの検証と整形 |
 | `src/tweet-dom.ts` | content 用の DOM ヘルパー（本文抽出、ページ判定） |
 | `src/urls.ts` | URL の検証 |
