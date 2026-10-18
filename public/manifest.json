@@ -1,7 +1,6 @@
 {
   "manifest_version": 3,
   "name": "X Bookmark Sorter",
-  "version": "1.0.0",
   "description": "Twitterのブックマークをローカルに収集し、フォルダ分けして整理するツールです。",
   "permissions": [
     "storage",
