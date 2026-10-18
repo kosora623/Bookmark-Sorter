@@ -1,5 +1,6 @@
 import { DEFAULT_FOLDER } from './constants';
 import type { BookmarkPost } from './db';
+import { extractTweetText, isBookmarksPath } from './tweet-dom';
 
 const INSTANCE_ID = Math.random().toString(36).slice(2);
 const BATCH_LIMIT = 100;
@@ -394,29 +395,6 @@ function parseLinkCard(tweetEl: HTMLElement): BookmarkPost['linkCard'] | undefin
   return card;
 }
 
-/**
- * innerText だと絵文字（<img alt>）が消え、URL は「example.com/…」に省略される。
- * DOM をたどって絵文字は alt、URL リンクは隠し部分を含む全文で組み立てる。
- */
-function extractTweetText(root: Node): string {
-  let out = '';
-  for (const node of Array.from(root.childNodes)) {
-    if (node.nodeType === Node.TEXT_NODE) {
-      out += node.textContent ?? '';
-    } else if (node instanceof HTMLImageElement) {
-      out += node.alt;
-    } else if (node instanceof HTMLBRElement) {
-      out += '\n';
-    } else if (node instanceof HTMLAnchorElement) {
-      const full = (node.textContent ?? '').replace(/…$/, '').trim();
-      out += /^https?:\/\/\S+$/.test(full) ? full : extractTweetText(node);
-    } else if (node instanceof HTMLElement) {
-      out += extractTweetText(node);
-    }
-  }
-  return out;
-}
-
 function parseTweetElement(tweetEl: HTMLElement): BookmarkPost | null {
   try {
     const timeEl = queryOwn(tweetEl, 'time');
@@ -561,11 +539,6 @@ async function startAutoCollect(): Promise<void> {
   }
 }
 
-function isBookmarksPage(): boolean {
-  const path = window.location.pathname.replace(/\/+$/, '') || '/';
-  return ['/i/history', '/i/bookmarks'].some((base) => path === base || path.startsWith(`${base}/`));
-}
-
 function checkPage(): void {
   if (!isExtensionAlive()) {
     teardown();
@@ -580,7 +553,7 @@ function checkPage(): void {
     });
   }
 
-  if (isBookmarksPage()) {
+  if (isBookmarksPath(window.location.pathname)) {
     createOverlayUI();
   } else {
     const overlay = document.getElementById('x-bm-sorter-overlay');
