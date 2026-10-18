@@ -33,7 +33,7 @@ export type ExtensionRequest =
   | { action: 'get_unprocessed'; excludeIds?: string[]; limit?: number }
   | { action: 'update_bookmark'; id: string; changes: BookmarkChanges }
   | { action: 'get_counts' }
-  | { action: 'list_kept' }
+  | { action: 'list_kept'; folder?: string; query?: string; offset?: number; limit?: number }
   | { action: 'list_folders' }
   | { action: 'add_folder'; name: string }
   | { action: 'delete_folder'; name: string }

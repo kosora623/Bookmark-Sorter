@@ -5,6 +5,7 @@ import {
   type FolderInfo,
   type UnbookmarkFailure
 } from './messages';
+import { MAX_KEPT_PAGE_LIMIT, listKept } from './kept-query';
 import {
   isBookmarkPost,
   parseImportData,
@@ -190,12 +191,6 @@ async function getCounts(): Promise<{ unprocessed: number; kept: number }> {
     db.bookmarks.where('status').equals('kept').count()
   ]);
   return { unprocessed, kept };
-}
-
-async function listKept(): Promise<{ posts: BookmarkPost[] }> {
-  const posts = await db.bookmarks.where('status').equals('kept').sortBy('savedAt');
-  posts.reverse();
-  return { posts };
 }
 
 function sortFolderNames(names: string[]): string[] {
@@ -585,7 +580,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.action === 'list_kept') {
     if (!isExtensionPage(sender)) return;
-    void listKept().then(sendResponse);
+    void listKept(db, {
+      folder: typeof message.folder === 'string' && message.folder ? message.folder : DEFAULT_FOLDER,
+      query: typeof message.query === 'string' ? message.query : '',
+      offset: typeof message.offset === 'number' ? message.offset : 0,
+      limit: typeof message.limit === 'number' ? message.limit : MAX_KEPT_PAGE_LIMIT
+    }).then(sendResponse);
     return true;
   }
 

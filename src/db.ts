@@ -60,6 +60,10 @@ export class BookmarkDatabase extends Dexie {
       bookmarks: 'id, folder, status, savedAt, [status+savedAt], [status+folder]',
       folders: 'name'
     });
+    this.version(6).stores({
+      bookmarks: 'id, folder, status, savedAt, [status+savedAt], [status+folder], [status+folder+savedAt]',
+      folders: 'name'
+    });
   }
 }
 

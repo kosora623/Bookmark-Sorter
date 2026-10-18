@@ -64,6 +64,16 @@ export function sanitizeFolderName(name: string): string {
   return name.trim().replace(/\s+/g, ' ').slice(0, MAX_FOLDER_NAME_LENGTH);
 }
 
+export function normalizeQuery(query: string): string {
+  return query.trim().toLowerCase();
+}
+
+/** 本文・投稿者名の部分一致（大文字小文字は区別しない）。query は normalizeQuery 済みのもの */
+export function matchesQuery(post: Pick<BookmarkPost, 'author' | 'text'>, query: string): boolean {
+  if (!query) return true;
+  return post.author.toLowerCase().includes(query) || post.text.toLowerCase().includes(query);
+}
+
 export type ParsedImport =
   | { ok: true; posts: BookmarkPost[]; folders: string[] }
   | { ok: false; error: string };
