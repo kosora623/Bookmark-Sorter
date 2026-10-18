@@ -7,13 +7,16 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@types/chrome": "^0.2.5",
     "@types/node": "^26.2.0",
+    "jsdom": "^29.1.1",
     "typescript": "~6.0.2",
-    "vite": "^8.2.1"
+    "vite": "^8.2.1",
+    "vitest": "^5.0.5"
   },
   "dependencies": {
     "dexie": "^4.4.4"

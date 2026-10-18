@@ -91,7 +91,18 @@ npm run build
 
 できた `dist` フォルダを、上記の「パッケージ化されていない拡張機能を読み込む」で指定します。コードを変えたあとは再ビルドし、拡張機能の画面で再読み込みしてください。
 
-非エンジニア向けに配るときは、`dist` フォルダを zip にして GitHub の Releases に添付してください。
+テストは `npm test`（Vitest）で実行します。push と PR では GitHub Actions がテストとビルドを走らせます。
+
+### リリース
+
+`package.json` の `version` を上げてコミットし、同じ番号のタグを push します。
+
+```bash
+git tag v1.1.0
+git push origin v1.1.0
+```
+
+GitHub Actions がビルドし、`dist` を zip にして Releases に添付します。タグと `version` が食い違っているとリリースは失敗します。
 
 ## アーキテクチャ
 
@@ -113,6 +124,8 @@ x.com / i/history     dashboard (index.html)
 | `src/background.ts` | DB の読み書き、解除キュー、ダッシュボード起動 |
 | `src/db.ts` | `BookmarkPost` 型と Dexie スキーマ |
 | `src/messages.ts` | content / dashboard / background のメッセージ型 |
+| `src/normalize.ts` | 受け取ったポスト・インポートデータの検証と整形 |
+| `src/tweet-dom.ts` | content 用の DOM ヘルパー（本文抽出、ページ判定） |
 | `src/urls.ts` | URL の検証 |
 | `src/constants.ts` | 既定フォルダ名 |
 | `public/manifest.json` | MV3 マニフェスト |

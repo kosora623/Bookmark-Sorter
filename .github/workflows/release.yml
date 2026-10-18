@@ -1,0 +1,39 @@
+name: Release
+
+# v1.2.3 のようなタグを push すると、ビルドした dist を zip にして Releases に添付する
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: タグと package.json の version が一致するか確認
+        run: |
+          expected="v$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$expected" ]; then
+            echo "::error::タグ $GITHUB_REF_NAME と package.json の version ($expected) が一致しません"
+            exit 1
+          fi
+
+      - run: npm test
+      - run: npm run build
+
+      - name: dist を zip にする
+        run: zip -r "bookmark-sorter-${GITHUB_REF_NAME}.zip" dist
+
+      - name: Release を作成
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "bookmark-sorter-${GITHUB_REF_NAME}.zip" --generate-notes
