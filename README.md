@@ -128,7 +128,7 @@ x.com / i/history     dashboard (index.html)
 | `src/tweet-dom.ts` | content 用の DOM ヘルパー（本文抽出、ページ判定） |
 | `src/urls.ts` | URL の検証 |
 | `src/constants.ts` | 既定フォルダ名 |
-| `public/manifest.json` | MV3 マニフェスト |
+| `public/manifest.json` | MV3 マニフェスト（`version` はビルド時に `package.json` から入る） |
 | `public/content-loader.js` | content script から `assets/content.js` を動的 import |
 | `index.html` | ダッシュボード |
 
