@@ -419,6 +419,14 @@ function parseTweetElement(tweetEl: HTMLElement): BookmarkPost | null {
       if (src && isHttpUrl(src) && !src.startsWith('data:')) images.push(src);
     }
 
+    // 動画は blob: で配信されて後から再生できないので、サムネイル（poster）と「動画あり」だけ持つ
+    const hasVideo =
+      queryOwn(tweetEl, '[data-testid="videoPlayer"], [data-testid="videoComponent"], video') != null;
+    for (const video of queryOwnAll<HTMLVideoElement>(tweetEl, 'video')) {
+      const poster = video.poster;
+      if (poster && isHttpUrl(poster) && !images.includes(poster)) images.push(poster);
+    }
+
     const linkCard = parseLinkCard(tweetEl);
 
     const post: BookmarkPost = {
@@ -433,6 +441,7 @@ function parseTweetElement(tweetEl: HTMLElement): BookmarkPost | null {
     };
     if (linkCard) post.linkCard = linkCard;
     if (postedAt && !Number.isNaN(Date.parse(postedAt))) post.postedAt = postedAt;
+    if (hasVideo) post.hasVideo = true;
     return post;
   } catch (err) {
     console.error('ポスト解析エラー:', err);

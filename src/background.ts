@@ -161,6 +161,10 @@ async function savePosts(posts: unknown): Promise<{ savedCount: number }> {
     if (stored == null) return;
     const changes: Partial<BookmarkPost> = {};
     if (stored.linkCard == null && post.linkCard != null) changes.linkCard = post.linkCard;
+    if (!stored.hasVideo && post.hasVideo) {
+      changes.hasVideo = true;
+      changes.images = post.images;
+    }
     if (stored.postedAt == null && post.postedAt != null) changes.postedAt = post.postedAt;
     if (Object.keys(changes).length > 0) enrichments.push({ id: post.id, changes });
   });

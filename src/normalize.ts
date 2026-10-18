@@ -1,7 +1,7 @@
 import { DEFAULT_FOLDER } from './constants';
 import type { BookmarkPost } from './db';
 import type { BookmarkChanges, ExportData } from './messages';
-import { isHttpUrl, isXStatusUrl } from './urls';
+import { isHttpUrl, isXStatusUrl, normalizeImageUrls } from './urls';
 
 // 外部（content script・インポートファイル）から来たデータを DB に入れる前に整える関数群。
 // Dexie を読み込まないので、テストから直接呼べる。
@@ -27,9 +27,7 @@ function toLinkCard(value: BookmarkPost['linkCard']): BookmarkPost['linkCard'] |
 }
 
 export function toBookmarkPost(post: BookmarkPost): BookmarkPost {
-  const images = Array.isArray(post.images)
-    ? post.images.filter((url): url is string => typeof url === 'string' && isHttpUrl(url))
-    : [];
+  const images = Array.isArray(post.images) ? normalizeImageUrls(post.images) : [];
   const status = post.status && STATUSES.has(post.status) ? post.status : 'unprocessed';
   const linkCard = toLinkCard(post.linkCard);
   const url = typeof post.url === 'string' && isXStatusUrl(post.url) ? post.url : '';
@@ -47,6 +45,7 @@ export function toBookmarkPost(post: BookmarkPost): BookmarkPost {
   if (typeof post.postedAt === 'string' && !Number.isNaN(Date.parse(post.postedAt))) {
     result.postedAt = post.postedAt;
   }
+  if (post.hasVideo === true) result.hasVideo = true;
   if (linkCard) result.linkCard = linkCard;
   return result;
 }
