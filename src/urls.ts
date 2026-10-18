@@ -36,6 +36,39 @@ export function isXStatusUrl(value: string): boolean {
   return statusIdFromUrl(value) !== undefined;
 }
 
+/**
+ * タイムラインの画像は name=small / 360x360 などの縮小版なので、pbs.twimg.com/media の画像は
+ * name=large に揃える。それ以外（カード画像・動画サムネイル）はそのまま返す。
+ */
+export function toLargeImageUrl(value: string): string {
+  try {
+    const parsed = new URL(value);
+    if (parsed.hostname !== 'pbs.twimg.com' || !parsed.pathname.startsWith('/media/')) return value;
+
+    // 旧形式 /media/xxx.jpg:small → /media/xxx.jpg?format=jpg&name=large
+    const legacy = parsed.pathname.match(/^(\/media\/[^/.:]+)\.(\w+)(?::\w+)?$/);
+    if (legacy) {
+      parsed.pathname = legacy[1] ?? parsed.pathname;
+      if (!parsed.searchParams.has('format')) parsed.searchParams.set('format', legacy[2] ?? 'jpg');
+    }
+    parsed.searchParams.set('name', 'large');
+    return parsed.toString();
+  } catch {
+    return value;
+  }
+}
+
+/** http(s) の画像だけ残し、大きいサイズに揃えて重複を除く */
+export function normalizeImageUrls(urls: unknown[]): string[] {
+  const result: string[] = [];
+  for (const url of urls) {
+    if (typeof url !== 'string' || !isHttpUrl(url)) continue;
+    const large = toLargeImageUrl(url);
+    if (!result.includes(large)) result.push(large);
+  }
+  return result;
+}
+
 export function isXHostUrl(value: string): boolean {
   try {
     const host = new URL(value).hostname.replace(/^www\./i, '').toLowerCase();

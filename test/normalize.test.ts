@@ -49,7 +49,7 @@ describe('toBookmarkPost', () => {
     expect(result.url).toBe('');
     expect(result.author).toBe('不明');
     expect(result.text).toBe('');
-    expect(result.images).toEqual(['https://pbs.twimg.com/media/a.jpg']);
+    expect(result.images).toEqual(['https://pbs.twimg.com/media/a?format=jpg&name=large']);
     expect(result.folder).toBe(DEFAULT_FOLDER);
     expect(result.status).toBe('unprocessed');
     expect(Number.isNaN(Date.parse(result.savedAt))).toBe(false);
@@ -70,6 +70,15 @@ describe('toBookmarkPost', () => {
 
     const badCard = toBookmarkPost(post({ linkCard: { url: 'javascript:x' } }));
     expect(badCard.linkCard).toBeUndefined();
+  });
+
+  it('画像は大きいサイズに揃え、hasVideo は true のときだけ残す', () => {
+    const result = toBookmarkPost(
+      post({ images: ['https://pbs.twimg.com/media/A?format=jpg&name=small'], hasVideo: true })
+    );
+    expect(result.images).toEqual(['https://pbs.twimg.com/media/A?format=jpg&name=large']);
+    expect(result.hasVideo).toBe(true);
+    expect('hasVideo' in toBookmarkPost(post({ hasVideo: 'yes' as never }))).toBe(false);
   });
 
   it('知らないフィールドは捨てる', () => {

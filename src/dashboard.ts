@@ -425,6 +425,8 @@ function renderCard(post: BookmarkPost): void {
   if (authorEl) fillAuthor(authorEl, post.author);
   if (textEl) fillTextWithLinks(textEl, post.text);
   renderImages(post.images);
+  const videoBadge = document.getElementById('card-video');
+  if (videoBadge) videoBadge.hidden = post.hasVideo !== true;
   renderLinkPreview(document.getElementById('card-link-preview'), post.linkCard);
 
   if (openLink) {

@@ -343,6 +343,19 @@
       border: 0;
     }
 
+    .video-badge {
+      display: inline-block;
+      margin: 10px 0 0;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .video-badge[hidden] { display: none; }
+
     .discard-hint {
       display: none;
       margin: 16px 0 0;
@@ -764,6 +777,7 @@
             </div>
             <div class="text" id="card-text"></div>
             <div class="images" id="card-images" data-count="0"></div>
+            <p id="card-video" class="video-badge" hidden>▶ 動画あり（<kbd>O</kbd> で元ポストを開いて再生）</p>
             <div class="link-preview-wrap" id="card-link-preview"></div>
             <p id="discard-hint" class="discard-hint">もう一度 ← を押すと削除します（Esc でキャンセル）</p>
             <div class="controls">
