@@ -1,15 +1,21 @@
 import { DEFAULT_FOLDER, db, type BookmarkPost } from './db';
 import {
   isExtensionRequest,
-  type BookmarkChanges,
   type ExportData,
   type FolderInfo,
   type UnbookmarkFailure
 } from './messages';
+import { MAX_KEPT_PAGE_LIMIT, listKept } from './kept-query';
+import {
+  isBookmarkPost,
+  parseImportData,
+  sanitizeChanges,
+  sanitizeFolderName,
+  toBookmarkPost
+} from './normalize';
 import {
   PENDING_UNBOOKMARK_KEY,
   UNBOOKMARK_INFLIGHT_KEY,
-  isHttpUrl,
   isXHostUrl,
   isXStatusUrl,
   statusIdFromUrl,
@@ -26,7 +32,6 @@ const MAX_UNBOOKMARK_FAILURES = 500;
 const UNBOOKMARK_STORAGE_KEY = 'unbookmarkQueue';
 const UNBOOKMARK_FAILED_KEY = 'unbookmarkFailed';
 const MAX_UNPROCESSED_LIMIT = 50;
-const STATUSES: ReadonlySet<BookmarkPost['status']> = new Set(['unprocessed', 'kept', 'discarded']);
 
 interface UnbookmarkJob {
   url: string;
@@ -37,57 +42,6 @@ interface UnbookmarkJob {
 let unbookmarkQueue: UnbookmarkJob[] = [];
 let unbookmarkRunning = false;
 let wakeQueueWait: (() => void) | null = null;
-
-function isBookmarkPost(value: unknown): value is BookmarkPost {
-  if (typeof value !== 'object' || value === null) return false;
-  const post = value as Partial<BookmarkPost>;
-  return typeof post.id === 'string' && /^\d+$/.test(post.id);
-}
-
-function toLinkCard(value: BookmarkPost['linkCard']): BookmarkPost['linkCard'] | undefined {
-  if (typeof value !== 'object' || value === null) return undefined;
-  if (typeof value.url !== 'string' || !isHttpUrl(value.url)) return undefined;
-
-  const card: NonNullable<BookmarkPost['linkCard']> = { url: value.url };
-  if (typeof value.title === 'string' && value.title) card.title = value.title;
-  if (typeof value.domain === 'string' && value.domain) card.domain = value.domain;
-  if (typeof value.image === 'string' && value.image && isHttpUrl(value.image)) card.image = value.image;
-  return card;
-}
-
-function toBookmarkPost(post: BookmarkPost): BookmarkPost {
-  const images = Array.isArray(post.images)
-    ? post.images.filter((url): url is string => typeof url === 'string' && isHttpUrl(url))
-    : [];
-  const status = post.status && STATUSES.has(post.status) ? post.status : 'unprocessed';
-  const linkCard = toLinkCard(post.linkCard);
-  const url = typeof post.url === 'string' && isXStatusUrl(post.url) ? post.url : '';
-
-  const result: BookmarkPost = {
-    id: post.id,
-    url,
-    author: typeof post.author === 'string' ? post.author : '不明',
-    text: typeof post.text === 'string' ? post.text : '',
-    images,
-    folder: typeof post.folder === 'string' && post.folder ? post.folder : DEFAULT_FOLDER,
-    status,
-    savedAt: typeof post.savedAt === 'string' ? post.savedAt : new Date().toISOString()
-  };
-  if (typeof post.postedAt === 'string' && !Number.isNaN(Date.parse(post.postedAt))) {
-    result.postedAt = post.postedAt;
-  }
-  if (linkCard) result.linkCard = linkCard;
-  return result;
-}
-
-function sanitizeChanges(changes: BookmarkChanges): BookmarkChanges {
-  const next: BookmarkChanges = {};
-  if (typeof changes.folder === 'string') next.folder = changes.folder;
-  if (changes.status && STATUSES.has(changes.status)) {
-    next.status = changes.status;
-  }
-  return next;
-}
 
 function isUnbookmarkJob(value: unknown): value is UnbookmarkJob {
   if (typeof value !== 'object' || value === null) return false;
@@ -239,12 +193,6 @@ async function getCounts(): Promise<{ unprocessed: number; kept: number }> {
   return { unprocessed, kept };
 }
 
-async function listKept(): Promise<{ posts: BookmarkPost[] }> {
-  const posts = await db.bookmarks.where('status').equals('kept').sortBy('savedAt');
-  posts.reverse();
-  return { posts };
-}
-
 function sortFolderNames(names: string[]): string[] {
   return [...names].sort((a, b) => {
     if (a === DEFAULT_FOLDER) return -1;
@@ -284,10 +232,6 @@ async function listFolders(): Promise<{ folders: FolderInfo[] }> {
       locked: name === DEFAULT_FOLDER
     }))
   };
-}
-
-function sanitizeFolderName(name: string): string {
-  return name.trim().replace(/\s+/g, ' ').slice(0, 40);
 }
 
 async function addFolder(rawName: string): Promise<{ ok: boolean; error?: string; folders: FolderInfo[] }> {
@@ -334,34 +278,15 @@ async function exportData(): Promise<ExportData> {
 }
 
 async function importData(data: unknown): Promise<{ ok: boolean; error?: string; imported: number }> {
-  if (typeof data !== 'object' || data === null) {
-    return { ok: false, error: 'ファイルの形式が正しくありません', imported: 0 };
-  }
-  const payload = data as Partial<ExportData>;
-  if (payload.format !== 'x-bookmark-sorter' || !Array.isArray(payload.bookmarks)) {
-    return { ok: false, error: 'Bookmark Sorter のエクスポートファイルではありません', imported: 0 };
-  }
-
-  const posts = new Map<string, BookmarkPost>();
-  for (const raw of payload.bookmarks) {
-    if (!isBookmarkPost(raw)) continue;
-    const post = toBookmarkPost(raw);
-    if (post.url) posts.set(post.id, post);
-  }
-
-  const folderNames = Array.isArray(payload.folders)
-    ? payload.folders
-        .filter((name): name is string => typeof name === 'string')
-        .map(sanitizeFolderName)
-        .filter(Boolean)
-    : [];
+  const parsed = parseImportData(data);
+  if (!parsed.ok) return { ok: false, error: parsed.error, imported: 0 };
 
   await db.transaction('rw', db.bookmarks, db.folders, async () => {
-    if (posts.size > 0) await db.bookmarks.bulkPut([...posts.values()]);
-    if (folderNames.length > 0) await db.folders.bulkPut(folderNames.map((name) => ({ name })));
+    if (parsed.posts.length > 0) await db.bookmarks.bulkPut(parsed.posts);
+    if (parsed.folders.length > 0) await db.folders.bulkPut(parsed.folders.map((name) => ({ name })));
   });
   await ensureFolders();
-  return { ok: true, imported: posts.size };
+  return { ok: true, imported: parsed.posts.length };
 }
 
 async function clearBookmarks(): Promise<{ ok: true }> {
@@ -655,7 +580,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.action === 'list_kept') {
     if (!isExtensionPage(sender)) return;
-    void listKept().then(sendResponse);
+    void listKept(db, {
+      folder: typeof message.folder === 'string' && message.folder ? message.folder : DEFAULT_FOLDER,
+      query: typeof message.query === 'string' ? message.query : '',
+      offset: typeof message.offset === 'number' ? message.offset : 0,
+      limit: typeof message.limit === 'number' ? message.limit : MAX_KEPT_PAGE_LIMIT
+    }).then(sendResponse);
     return true;
   }
 
