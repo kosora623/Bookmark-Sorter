@@ -12,18 +12,15 @@ import {
   type UnbookmarkFailure
 } from './messages';
 import { MAX_KEPT_PAGE_LIMIT, listKept } from './kept-query';
-import {
-  isBookmarkPost,
-  parseImportData,
-  sanitizeChanges,
-  sanitizeFolderName,
-  toBookmarkPost
-} from './normalize';
+import { parseImportData, sanitizeChanges, sanitizeFolderName } from './normalize';
+import { savePosts } from './save-posts';
+import { UnbookmarkQueue, type UnbookmarkJob } from './unbookmark-queue';
 import {
   PENDING_UNBOOKMARK_KEY,
   UNBOOKMARK_INFLIGHT_KEY,
   isXHostUrl,
   isXStatusUrl,
+  sanitizeStatusUrl,
   statusIdFromUrl,
   type InflightUnbookmark,
   type PendingUnbookmark
@@ -42,27 +39,6 @@ const UNBOOKMARK_FAILED_KEY = 'unbookmarkFailed';
 const UNBOOKMARK_ALARM = 'unbookmark-queue';
 const UNBOOKMARK_ALARM_PERIOD_MINUTES = 1;
 const MAX_UNPROCESSED_LIMIT = 50;
-
-interface UnbookmarkJob {
-  url: string;
-  earliest: number;
-  attempts?: number;
-}
-
-let unbookmarkQueue: UnbookmarkJob[] = [];
-let unbookmarkRunning = false;
-let wakeQueueWait: (() => void) | null = null;
-
-function isUnbookmarkJob(value: unknown): value is UnbookmarkJob {
-  if (typeof value !== 'object' || value === null) return false;
-  const job = value as Partial<UnbookmarkJob>;
-  return (
-    typeof job.url === 'string' &&
-    isXStatusUrl(job.url) &&
-    typeof job.earliest === 'number' &&
-    (job.attempts === undefined || typeof job.attempts === 'number')
-  );
-}
 
 function isUnbookmarkFailure(value: unknown): value is UnbookmarkFailure {
   if (typeof value !== 'object' || value === null) return false;
@@ -107,29 +83,22 @@ async function retryUnbookmarkFailures(): Promise<{ queued: number }> {
     const id = statusIdFromUrl(failure.url);
     const post = id ? await db.bookmarks.get(id) : undefined;
     if (post?.status !== 'discarded') continue;
-    if (unbookmarkQueue.some((job) => job.url === failure.url)) continue;
-    unbookmarkQueue.push({ url: failure.url, earliest: Date.now() });
-    queued++;
-  }
-
-  if (queued > 0) {
-    await persistUnbookmarkQueue();
-    void processUnbookmarkQueue();
+    if (await unbookmarkQueue.enqueue(failure.url, 0)) queued++;
   }
   return { queued };
 }
 
-async function persistUnbookmarkQueue(): Promise<void> {
-  await chrome.storage.local.set({ [UNBOOKMARK_STORAGE_KEY]: unbookmarkQueue });
-  await syncQueueAlarm();
+async function persistUnbookmarkQueue(jobs: readonly UnbookmarkJob[]): Promise<void> {
+  await chrome.storage.local.set({ [UNBOOKMARK_STORAGE_KEY]: jobs });
+  await syncQueueAlarm(jobs.length);
 }
 
 /**
  * キューが残っていればアラームを張り直し、空なら外す。
  * 張り直すたびに発火が先送りされるので、処理が進んでいる間は発火せず、止まったときだけ発火する。
  */
-async function syncQueueAlarm(): Promise<void> {
-  if (unbookmarkQueue.length === 0) {
+async function syncQueueAlarm(queuedCount: number): Promise<void> {
+  if (queuedCount === 0) {
     await chrome.alarms.clear(UNBOOKMARK_ALARM);
     return;
   }
@@ -137,68 +106,6 @@ async function syncQueueAlarm(): Promise<void> {
     delayInMinutes: UNBOOKMARK_ALARM_PERIOD_MINUTES,
     periodInMinutes: UNBOOKMARK_ALARM_PERIOD_MINUTES
   });
-}
-
-function wakeQueue(): void {
-  if (!wakeQueueWait) return;
-  const wake = wakeQueueWait;
-  wakeQueueWait = null;
-  wake();
-}
-
-function waitForQueue(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      wakeQueueWait = null;
-      resolve();
-    }, ms);
-    wakeQueueWait = () => {
-      clearTimeout(timer);
-      wakeQueueWait = null;
-      resolve();
-    };
-  });
-}
-
-async function savePosts(posts: unknown): Promise<{ savedCount: number }> {
-  if (!Array.isArray(posts)) return { savedCount: 0 };
-
-  const unique = new Map<string, BookmarkPost>();
-  for (const post of posts) {
-    if (!isBookmarkPost(post)) continue;
-    const normalized = toBookmarkPost(post);
-    if (!normalized.url) continue;
-    unique.set(normalized.id, normalized);
-  }
-
-  const candidates = [...unique.values()];
-  if (candidates.length === 0) return { savedCount: 0 };
-
-  const existing = await db.bookmarks.bulkGet(candidates.map((post) => post.id));
-  const toAdd = candidates.filter((_, index) => existing[index] == null);
-  if (toAdd.length > 0) {
-    await db.bookmarks.bulkAdd(toAdd);
-  }
-
-  // 既存データに無い項目（リンクカード・投稿日時）だけ後から補う
-  const enrichments: { id: string; changes: Partial<BookmarkPost> }[] = [];
-  candidates.forEach((post, index) => {
-    const stored = existing[index];
-    if (stored == null) return;
-    const changes: Partial<BookmarkPost> = {};
-    if (stored.linkCard == null && post.linkCard != null) changes.linkCard = post.linkCard;
-    if (!stored.hasVideo && post.hasVideo) {
-      changes.hasVideo = true;
-      changes.images = post.images;
-    }
-    if (stored.postedAt == null && post.postedAt != null) changes.postedAt = post.postedAt;
-    if (Object.keys(changes).length > 0) enrichments.push({ id: post.id, changes });
-  });
-  if (enrichments.length > 0) {
-    await Promise.all(enrichments.map(({ id, changes }) => db.bookmarks.update(id, changes)));
-  }
-
-  return { savedCount: toAdd.length };
 }
 
 async function getUnprocessed(excludeIds: string[] = [], rawLimit = 1): Promise<{ posts: BookmarkPost[] }> {
@@ -315,9 +222,7 @@ async function importData(data: unknown): Promise<{ ok: boolean; error?: string;
 
 async function clearBookmarks(): Promise<{ ok: true }> {
   await queueReady;
-  unbookmarkQueue = [];
-  wakeQueue();
-  await persistUnbookmarkQueue();
+  await unbookmarkQueue.clear();
   await saveUnbookmarkFailures([]);
   await chrome.storage.session.remove([PENDING_UNBOOKMARK_KEY, UNBOOKMARK_INFLIGHT_KEY]);
   await db.bookmarks.clear();
@@ -342,18 +247,6 @@ function isXContentScript(sender: chrome.runtime.MessageSender): boolean {
   if (!sender.tab?.id) return false;
   const url = sender.url ?? sender.tab.url;
   return typeof url === 'string' && isXHostUrl(url);
-}
-
-function sanitizeStatusUrl(url: string): string | undefined {
-  if (!isXStatusUrl(url)) return undefined;
-  try {
-    const parsed = new URL(url);
-    parsed.hash = '';
-    parsed.search = '';
-    return parsed.toString();
-  } catch {
-    return undefined;
-  }
 }
 
 async function setPendingUnbookmark(url: string): Promise<void> {
@@ -404,19 +297,13 @@ async function openDashboard(): Promise<void> {
 async function enqueueUnbookmark(tweetUrl: string): Promise<void> {
   await queueReady;
   const url = sanitizeStatusUrl(tweetUrl);
-  if (!url || unbookmarkQueue.some((job) => job.url === url)) return;
-  unbookmarkQueue.push({ url, earliest: Date.now() + UNBOOKMARK_DELAY_MS });
-  await persistUnbookmarkQueue();
-  void processUnbookmarkQueue();
+  if (url) await unbookmarkQueue.enqueue(url, UNBOOKMARK_DELAY_MS);
 }
 
 async function cancelQueuedUnbookmark(tweetUrl: string): Promise<void> {
   await queueReady;
   const url = sanitizeStatusUrl(tweetUrl) ?? tweetUrl;
-  const before = unbookmarkQueue.length;
-  unbookmarkQueue = unbookmarkQueue.filter((job) => job.url !== url && job.url !== tweetUrl);
-  if (unbookmarkQueue.length !== before) await persistUnbookmarkQueue();
-  wakeQueue();
+  await unbookmarkQueue.cancel([url, tweetUrl]);
   await removeUnbookmarkFailure(url);
 }
 
@@ -424,8 +311,15 @@ async function cancelQueuedUnbookmark(tweetUrl: string): Promise<void> {
 function runOneUnbookmark(tweetUrl: string): Promise<boolean> {
   return new Promise((resolve) => {
     void (async () => {
-      await setPendingUnbookmark(tweetUrl);
-      await setInflight({ url: tweetUrl });
+      try {
+        await setPendingUnbookmark(tweetUrl);
+        await setInflight({ url: tweetUrl });
+      } catch (error) {
+        // ここで止まるとキュー全体が進まなくなるので、失敗として扱って再試行に回す
+        console.error(error);
+        resolve(false);
+        return;
+      }
 
       chrome.tabs.create({ url: tweetUrl, active: false }, (tab) => {
         if (chrome.runtime.lastError || !tab?.id) {
@@ -463,48 +357,21 @@ function runOneUnbookmark(tweetUrl: string): Promise<boolean> {
   });
 }
 
-async function processUnbookmarkQueue(): Promise<void> {
-  if (unbookmarkRunning) return;
-  unbookmarkRunning = true;
-
-  while (unbookmarkQueue.length > 0) {
-    const job = unbookmarkQueue[0];
-    if (!job) break;
-
-    const wait = job.earliest - Date.now();
-    if (wait > 0) {
-      await waitForQueue(wait);
-      continue;
-    }
-
-    const ok = await runOneUnbookmark(job.url);
-    // 実行中に Undo や全消去でキューから外れていたら、結果は捨てる
-    if (unbookmarkQueue[0] !== job) continue;
-    unbookmarkQueue.shift();
-
-    if (!ok) {
-      const attempts = (job.attempts ?? 0) + 1;
-      if (attempts < MAX_UNBOOKMARK_ATTEMPTS) {
-        unbookmarkQueue.push({ url: job.url, earliest: Date.now() + UNBOOKMARK_RETRY_DELAY_MS, attempts });
-      } else {
-        await recordUnbookmarkFailure(job.url);
-      }
-    }
-    await persistUnbookmarkQueue();
-  }
-
-  unbookmarkRunning = false;
-  if (unbookmarkQueue.length > 0) void processUnbookmarkQueue();
-}
+const unbookmarkQueue = new UnbookmarkQueue({
+  run: runOneUnbookmark,
+  persist: persistUnbookmarkQueue,
+  giveUp: recordUnbookmarkFailure,
+  maxAttempts: MAX_UNBOOKMARK_ATTEMPTS,
+  retryDelayMs: UNBOOKMARK_RETRY_DELAY_MS
+});
 
 async function restoreUnbookmarkQueue(): Promise<void> {
   try {
     await closeInflightTab();
     const stored = await chrome.storage.local.get(UNBOOKMARK_STORAGE_KEY);
-    const raw = stored[UNBOOKMARK_STORAGE_KEY];
-    unbookmarkQueue = Array.isArray(raw) ? raw.filter(isUnbookmarkJob) : [];
+    unbookmarkQueue.load(stored[UNBOOKMARK_STORAGE_KEY]);
     // 前回の Service Worker が張ったアラームを、復元したキューの状態に合わせる
-    await syncQueueAlarm();
+    await syncQueueAlarm(unbookmarkQueue.size);
   } catch (error) {
     console.error(error);
   }
@@ -514,10 +381,10 @@ async function restoreUnbookmarkQueue(): Promise<void> {
 const queueReady = restoreUnbookmarkQueue();
 
 function resumeUnbookmarkQueue(): void {
-  void queueReady.then(() => processUnbookmarkQueue());
+  void queueReady.then(() => unbookmarkQueue.process());
 }
 
-// どのイベントで起きても、まずキューの続きを始める（実行中なら processUnbookmarkQueue が何もしない）
+// どのイベントで起きても、まずキューの続きを始める（実行中なら process は何もしない）
 resumeUnbookmarkQueue();
 
 // 以下の 2 つは Service Worker を起こすためのきっかけ。リスナーはトップレベルで同期的に登録する必要がある
@@ -546,7 +413,7 @@ const numberOr = (value: unknown, fallback: number): number => (typeof value ===
 
 // action ごとの処理。型で全 action を網羅させる
 const routes: { [A in ExtensionAction]: Route<A> } = {
-  save_posts: { allow: isXContentScript, handle: (m) => savePosts(m.posts) },
+  save_posts: { allow: isXContentScript, handle: (m) => savePosts(db, m.posts) },
   // 実際の完了通知は runOneUnbookmark の listener が受け取る。ここでは応答だけ返す
   unbookmark_done: { allow: isXContentScript, handle: () => ({ ok: true }) },
   open_dashboard: {
