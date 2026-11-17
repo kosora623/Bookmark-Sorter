@@ -5,7 +5,14 @@ import { logUnexpected } from '../runtime';
 import { isHttpUrl } from '../urls';
 import { openTweet, saveLastFolder, sendMessage, sendQuietly } from './api';
 import { clonePost, fillAuthor, fillTextWithLinks, renderLinkPreview } from './dom';
-import { selectFolderByShortcut, selectedSortFolder } from './folders';
+import {
+  adjustFolderCount,
+  bindFolderRack,
+  flashFolderSlot,
+  renderFolderRack,
+  selectFolderByShortcut,
+  selectedSortFolder
+} from './folders';
 import { runExclusive, state } from './state';
 
 const MAX_UNDO = 30;
@@ -13,8 +20,10 @@ const DISCARD_CONFIRM_MS = 2000;
 const PREFETCH_SIZE = 8;
 
 type UndoEntry =
-  | { type: 'kept' | 'discarded'; post: BookmarkPost }
-  | { type: 'skipped'; post: BookmarkPost };
+  | { type: 'kept'; post: BookmarkPost; folder: string }
+  | { type: 'discarded' | 'skipped'; post: BookmarkPost };
+
+type ActionType = UndoEntry['type'];
 
 let currentPost: BookmarkPost | null = null;
 const skippedIds = new Set<string>();
@@ -24,6 +33,8 @@ const postQueue: BookmarkPost[] = [];
 let refillPromise: Promise<void> | null = null;
 let discardArmedId: string | null = null;
 let discardArmTimer: ReturnType<typeof setTimeout> | null = null;
+// この画面を開いてから整理した件数（取り消すと減る）
+const session: Record<ActionType, number> = { kept: 0, discarded: 0, skipped: 0 };
 
 /** データの全消去・インポートの後に、選別の状態を捨てる */
 export function resetSortState(): void {
@@ -31,17 +42,52 @@ export function resetSortState(): void {
   skippedIds.clear();
   undoStack.length = 0;
   postQueue.length = 0;
+  session.kept = 0;
+  session.discarded = 0;
+  session.skipped = 0;
   clearDiscardArm();
+  setLastAction('');
 }
 
 function pushUndo(entry: UndoEntry): void {
   undoStack.push(entry);
   if (undoStack.length > MAX_UNDO) undoStack.shift();
+  session[entry.type]++;
+  setLastAction(describeAction(entry));
+}
+
+function describeAction(entry: UndoEntry): string {
+  switch (entry.type) {
+    case 'kept':
+      return `「${entry.folder}」に保存しました`;
+    case 'discarded':
+      return '削除しました';
+    case 'skipped':
+      return 'スキップしました。あとでもう一度出ます';
+  }
+}
+
+/** 直前の操作と、取り消しボタンを出す */
+function setLastAction(message: string): void {
+  const last = document.getElementById('last-action');
+  const undoBtn = document.getElementById('btn-undo');
+  if (last) last.innerText = message;
+  if (undoBtn) undoBtn.hidden = undoStack.length === 0;
+}
+
+function renderSessionSummary(remaining: number): void {
+  const fill = document.getElementById('progress-fill');
+  if (!fill) return;
+  const done = session.kept + session.discarded;
+  const total = done + remaining;
+  fill.style.width = total > 0 ? `${(done / total) * 100}%` : '0%';
 }
 
 function setDiscardArmedUi(armed: boolean): void {
   document.getElementById('tweet-card')?.classList.toggle('confirm-discard', armed);
   document.getElementById('btn-discard')?.classList.toggle('armed', armed);
+  const label = document.getElementById('discard-label');
+  if (label) label.innerText = armed ? 'もう一度で削除' : '削除';
 }
 
 export function clearDiscardArm(): void {
@@ -136,7 +182,8 @@ export async function loadNextPost(): Promise<void> {
     currentPost = null;
     clearDiscardArm();
     showEmptyState(true);
-    await updateCount();
+    const counts = await updateCount();
+    renderEmptyMessage(counts.kept === 0 && session.kept + session.discarded === 0);
     return;
   }
 
@@ -146,6 +193,34 @@ export async function loadNextPost(): Promise<void> {
   renderCard(currentPost);
   void refillQueue().catch(logUnexpected);
   await updateCount();
+}
+
+/** 何も取り込んでいないときは取り込み方を、選別し終えたときは結果を出す */
+function renderEmptyMessage(nothingCollected: boolean): void {
+  const title = document.getElementById('empty-title');
+  const sub = document.getElementById('empty-sub');
+  if (!title || !sub) return;
+
+  sub.replaceChildren();
+  if (nothingCollected) {
+    title.innerText = 'まだブックマークを取り込んでいません';
+    const link = document.createElement('a');
+    link.href = 'https://x.com/i/bookmarks';
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.innerText = 'Twitter のブックマーク';
+    sub.append(link, ' を開き、右下の「100件を取得開始」で取り込むと、ここに 1 件ずつ出てきます');
+    return;
+  }
+
+  const done = session.kept + session.discarded;
+  title.innerText = '未整理のポストはありません';
+  const breakdown = [`保存 ${session.kept}`, `削除 ${session.discarded}`];
+  if (session.skipped > 0) breakdown.push(`スキップ ${session.skipped}`);
+  sub.innerText =
+    done > 0
+      ? `今回は ${done} 件を整理しました（${breakdown.join('・')}）。保存したポストは「保存済み」から見返せます`
+      : '保存したポストは「保存済み」から見返せます';
 }
 
 function showEmptyState(empty: boolean): void {
@@ -193,14 +268,23 @@ function renderCard(post: BookmarkPost): void {
     openLink.href = safe ? post.url : '#';
     openLink.hidden = !safe;
   }
+
+  const card = document.getElementById('tweet-card');
+  if (card) {
+    card.classList.remove('entering');
+    void card.offsetWidth; // 連続で出したときもアニメーションをやり直す
+    card.classList.add('entering');
+  }
 }
 
-async function updateCount(): Promise<void> {
+async function updateCount(): Promise<{ unprocessed: number; kept: number }> {
   const counts = await sendMessage({ action: 'get_counts' });
   const remainingEl = document.getElementById('remaining-count');
   const keptEl = document.getElementById('kept-count');
   if (remainingEl) remainingEl.innerText = String(counts.unprocessed);
   if (keptEl) keptEl.innerText = String(counts.kept);
+  renderSessionSummary(counts.unprocessed);
+  return counts;
 }
 
 async function updateCurrent(changes: BookmarkChanges): Promise<void> {
@@ -218,8 +302,11 @@ async function keepCurrentPost(): Promise<void> {
   skippedIds.delete(currentPost.id);
   const folder = selectedSortFolder();
   saveLastFolder(folder);
-  pushUndo({ type: 'kept', post: clonePost(currentPost) });
   await updateCurrent({ folder, status: 'kept' });
+  pushUndo({ type: 'kept', post: clonePost(currentPost), folder });
+  adjustFolderCount(folder, 1);
+  renderFolderRack();
+  flashFolderSlot(folder);
 }
 
 async function discardCurrentPost(): Promise<void> {
@@ -227,8 +314,8 @@ async function discardCurrentPost(): Promise<void> {
 
   skippedIds.delete(currentPost.id);
   const snapshot = clonePost(currentPost);
-  pushUndo({ type: 'discarded', post: snapshot });
   await updateCurrent({ status: 'discarded' });
+  pushUndo({ type: 'discarded', post: snapshot });
   scheduleUnbookmark(snapshot);
 }
 
@@ -247,7 +334,11 @@ function showPost(post: BookmarkPost): void {
 
 async function undoLast(): Promise<void> {
   const entry = undoStack.pop();
-  if (!entry) return;
+  if (!entry) {
+    setLastAction('取り消せる操作はありません');
+    return;
+  }
+  session[entry.type] = Math.max(0, session[entry.type] - 1);
 
   // 表示中のポストはキューの先頭に戻し、取り消したポストはキューから外す
   const displaced = currentPost && currentPost.id !== entry.post.id ? currentPost : null;
@@ -265,9 +356,14 @@ async function undoLast(): Promise<void> {
         folder: entry.post.folder
       }
     });
+    if (entry.type === 'kept') {
+      adjustFolderCount(entry.folder, -1);
+      renderFolderRack();
+    }
   }
 
   showPost(entry.post);
+  setLastAction('取り消しました');
   await updateCount();
 }
 
@@ -302,10 +398,18 @@ function discardOrArm(): void {
 
 /** 選別画面のボタン・キー操作を登録する */
 export function bindSortView(): void {
+  bindFolderRack();
+
+  document.getElementById('btn-undo')?.addEventListener('click', () => {
+    clearDiscardArm();
+    void runExclusive(undoLast);
+  });
+
   document.getElementById('folder-select')?.addEventListener('change', (e) => {
     const target = e.target;
     if (target instanceof HTMLSelectElement && target.value) {
       saveLastFolder(target.value);
+      renderFolderRack();
     }
   });
 

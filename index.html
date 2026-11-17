@@ -5,331 +5,68 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Bookmark Sorter</title>
   <style>
+    /*
+     * 「仕分け棚」: 郵便の仕分け棚のように、番号つきの棚（フォルダ）へ 1 件ずつ振り分ける画面。
+     * 色は鋼板のグレーグリーンを地に、墨色の文字、保存は深緑・削除は朱。
+     * 数字（残り件数・棚番号）は字幅の狭い Bahnschrift / DIN で読ませる。
+     */
     :root {
-      --bg: #15202b;
-      --surface: #192734;
-      --surface-hover: #22303c;
-      --input: #253341;
-      --border: #38444d;
-      --text: #e7e9ea;
-      --muted: #8899a6;
-      --accent: #1d9bf0;
-      --accent-soft: rgba(29, 155, 240, 0.12);
-      --keep: #00ba7c;
-      --danger: #f4212e;
-      --danger-soft: rgba(244, 33, 46, 0.12);
+      --bg: #e3e7e3;
+      --surface: #f8f9f7;
+      --slot: #d3dad5;
+      --slot-hover: #c8d0ca;
+      --ink: #1d2a2e;
+      --ink-2: #4f5e63;
+      --line: #c3cbc6;
+      --save: #0e6b57;
+      --save-hover: #0b5949;
+      --cut: #b4261c;
+      --cut-soft: #f6e1de;
+      --on-strong: #f8f9f7;
+      --focus: #2a6fdb;
+      --font-ui: "BIZ UDPGothic", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Noto Sans CJK JP", "Yu Gothic UI", Meiryo, sans-serif;
+      --font-num: "Bahnschrift", "DIN Alternate", "DIN Next", "Inter", var(--font-ui);
+      color-scheme: light;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #161c1e;
+        --surface: #1f272a;
+        --slot: #2a3437;
+        --slot-hover: #33403f;
+        --ink: #e4eae7;
+        --ink-2: #9aa9ab;
+        --line: #364241;
+        --save: #187a62;
+        --save-hover: #1d8c70;
+        --cut: #ff8d7f;
+        --cut-soft: #3a2220;
+        --on-strong: #161c1e;
+        --focus: #7fb0ff;
+        color-scheme: dark;
+      }
     }
 
     * { box-sizing: border-box; }
 
-    html { color-scheme: dark; }
-
     body {
       margin: 0;
-      color: var(--text);
+      color: var(--ink);
       background: var(--bg);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
-      font-size: 15px;
-      line-height: 1.5;
+      font: 15px/1.6 var(--font-ui);
+      -webkit-font-smoothing: antialiased;
     }
 
-    #app {
-      max-width: 1080px;
-      margin: 0 auto;
-      padding: 16px 24px 40px;
+    button, input, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+
+    :focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
     }
 
-    header {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 12px 20px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    h1 {
-      margin: 0;
-      font-size: 20px;
-      font-weight: 700;
-    }
-
-    .counts {
-      display: flex;
-      gap: 16px;
-      color: var(--muted);
-      font-size: 15px;
-    }
-
-    .counts strong {
-      color: var(--text);
-      font-size: 18px;
-      font-variant-numeric: tabular-nums;
-      margin-left: 4px;
-    }
-
-    .header-actions {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 10px;
-      margin-left: auto;
-    }
-
-    .view-tabs {
-      display: flex;
-      gap: 0;
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      overflow: hidden;
-    }
-
-    .tab-btn {
-      padding: 8px 18px;
-      border: 0;
-      background: var(--surface);
-      color: var(--muted);
-      cursor: pointer;
-      font: inherit;
-      font-size: 15px;
-      font-weight: 700;
-    }
-
-    .tab-btn + .tab-btn { border-left: 1px solid var(--border); }
-    .tab-btn.active { background: var(--accent); color: #fff; }
-
-    .danger-btn {
-      padding: 6px 12px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: transparent;
-      color: var(--muted);
-      cursor: pointer;
-      font: inherit;
-      font-size: 12px;
-      font-weight: 600;
-    }
-
-    .danger-btn:hover {
-      border-color: rgba(244, 33, 46, 0.45);
-      background: var(--danger-soft);
-      color: var(--danger);
-    }
-
-    .sub-btn {
-      padding: 6px 12px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: transparent;
-      color: var(--muted);
-      cursor: pointer;
-      font: inherit;
-      font-size: 12px;
-      font-weight: 600;
-    }
-
-    .sub-btn:hover {
-      border-color: rgba(29, 155, 240, 0.45);
-      background: var(--accent-soft);
-      color: var(--accent);
-    }
-
-    .sub-btn.warn {
-      border-color: rgba(244, 33, 46, 0.45);
-      color: var(--danger);
-    }
-
-    .card {
-      margin-top: 20px;
-      padding: 20px 22px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-    }
-
-    .card.confirm-discard {
-      border-color: var(--danger);
-      outline: 2px solid var(--danger);
-    }
-
-    .card-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 12px;
-      margin-bottom: 12px;
-    }
-
-    .author {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: baseline;
-      gap: 6px;
-      min-width: 0;
-      font-size: 15px;
-      font-weight: 400;
-    }
-
-    .author-name {
-      color: var(--text);
-      font-weight: 700;
-    }
-
-    .author-meta {
-      color: var(--muted);
-      font-weight: 400;
-      font-size: 14px;
-    }
-
-    .text {
-      font-size: 18px;
-      line-height: 1.7;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-    }
-
-    .text a,
-    .kept-text a {
-      color: var(--accent);
-      text-decoration: none;
-    }
-
-    .text a:hover,
-    .kept-text a:hover {
-      text-decoration: underline;
-    }
-
-    .link-preview-wrap {
-      margin-top: 12px;
-    }
-
-    .link-preview-wrap:empty { display: none; }
-
-    .link-preview {
-      display: flex;
-      flex-direction: row-reverse;
-      align-items: stretch;
-      overflow: hidden;
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      background: var(--bg);
-      color: inherit;
-      text-decoration: none;
-      min-height: 96px;
-    }
-
-    .link-preview:hover {
-      background: var(--surface-hover);
-      border-color: #3d5466;
-      text-decoration: none;
-    }
-
-    .link-preview-image {
-      width: 120px;
-      min-height: 96px;
-      object-fit: cover;
-      flex-shrink: 0;
-      background: #000;
-    }
-
-    .link-preview-body {
-      flex: 1;
-      min-width: 0;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      gap: 4px;
-      padding: 12px 14px;
-    }
-
-    .link-preview-domain {
-      color: var(--muted);
-      font-size: 13px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .link-preview-title {
-      font-size: 15px;
-      font-weight: 700;
-      line-height: 1.4;
-      overflow: hidden;
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-    }
-
-    .kept-row .link-preview {
-      min-height: 72px;
-    }
-
-    .kept-row .link-preview-image {
-      width: 72px;
-      min-height: 72px;
-    }
-
-    .kept-row .link-preview-title {
-      font-size: 14px;
-      font-weight: 600;
-    }
-
-    .images {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 16px;
-    }
-
-    .images:empty,
-    .images[data-count="0"] { display: none; }
-
-    .images img {
-      max-width: 100%;
-      max-height: 320px;
-      width: auto;
-      height: auto;
-      object-fit: contain;
-      border-radius: 8px;
-      background: #000;
-    }
-
-    .images[data-count="2"] img,
-    .images[data-count="3"] img,
-    .images[data-count="4"] img {
-      max-width: calc(50% - 4px);
-      max-height: 240px;
-    }
-
-    .open-link,
-    .kept-open {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      position: relative;
-      width: 32px;
-      height: 32px;
-      flex-shrink: 0;
-      border-radius: 999px;
-      color: var(--accent);
-      text-decoration: none;
-      opacity: 0.85;
-    }
-
-    .open-link:hover,
-    .kept-open:hover {
-      background: var(--accent-soft);
-      opacity: 1;
-      text-decoration: none;
-    }
-
-    .open-link svg,
-    .kept-open svg,
-    .folder-delete svg {
-      width: 16px;
-      height: 16px;
-      display: block;
-    }
+    [hidden] { display: none !important; }
 
     .visually-hidden {
       position: absolute;
@@ -343,180 +80,605 @@
       border: 0;
     }
 
-    .video-badge {
-      display: inline-block;
-      margin: 10px 0 0;
-      padding: 4px 10px;
-      border-radius: 999px;
-      background: var(--accent-soft);
-      color: var(--accent);
+    #app {
+      max-width: 880px;
+      margin: 0 auto;
+      padding: 20px 24px 48px;
+    }
+
+    #app:has(#kept-view:not([hidden])) { max-width: 1040px; }
+
+    /* ---------- ヘッダー ---------- */
+
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px 24px;
+    }
+
+    h1 {
+      margin: 0;
+      font: 600 17px var(--font-num);
+      letter-spacing: 0.01em;
+    }
+
+    .view-tabs {
+      display: flex;
+      padding: 3px;
+      border-radius: 8px;
+      background: var(--slot);
+    }
+
+    .tab-btn {
+      padding: 6px 16px;
+      border: 0;
+      border-radius: 6px;
+      background: none;
+      color: var(--ink-2);
+      font-weight: 700;
+    }
+
+    .tab-btn:hover { color: var(--ink); }
+
+    .tab-btn.active {
+      background: var(--surface);
+      color: var(--ink);
+      box-shadow: 0 1px 0 var(--line);
+    }
+
+    .tab-count {
+      margin-left: 6px;
+      font: 600 14px var(--font-num);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+    }
+
+    .warn-btn {
+      padding: 6px 12px;
+      border: 1px solid var(--cut);
+      border-radius: 8px;
+      background: var(--cut-soft);
+      color: var(--cut);
       font-size: 13px;
       font-weight: 700;
     }
 
-    .video-badge[hidden] { display: none; }
+    /* データの書き出し・読み込み・全消去はめったに使わないのでメニューにしまう */
+    .data-menu { position: relative; }
 
-    .discard-hint {
-      display: none;
-      margin: 16px 0 0;
-      padding: 10px 12px;
+    .data-menu > summary {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border: 1px solid var(--line);
       border-radius: 8px;
-      background: #3a1518;
-      color: #ffb4b8;
-      font-size: 15px;
-      font-weight: 700;
+      color: var(--ink-2);
+      font-size: 14px;
+      cursor: pointer;
+      list-style: none;
     }
 
-    .card.confirm-discard .discard-hint { display: block; }
+    .data-menu > summary::-webkit-details-marker { display: none; }
+    .data-menu > summary::after { content: "▾"; font-size: 11px; }
+    .data-menu > summary:hover,
+    .data-menu[open] > summary { color: var(--ink); background: var(--surface); }
 
-    .controls {
-      display: grid;
-      grid-template-columns: 1fr;
+    .menu-panel {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 6px);
+      z-index: 20;
+      width: 260px;
+      padding: 6px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: 0 10px 24px rgba(20, 30, 32, 0.18);
+    }
+
+    .menu-item {
+      display: block;
+      width: 100%;
+      padding: 8px 10px;
+      border: 0;
+      border-radius: 6px;
+      background: none;
+      text-align: left;
+    }
+
+    .menu-item small {
+      display: block;
+      color: var(--ink-2);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .menu-item:hover { background: var(--slot); }
+    .menu-item.danger { color: var(--cut); }
+    .menu-item.danger:hover { background: var(--cut-soft); }
+
+    .menu-sep {
+      height: 1px;
+      margin: 6px 4px;
+      background: var(--line);
+    }
+
+    /* 選別の進み具合はヘッダーの下線で見せる（今回整理した分 / それ+残り） */
+    .progress-bar {
+      height: 2px;
+      margin: 16px 0 24px;
+      background: var(--line);
+    }
+
+    .progress-bar > i {
+      display: block;
+      width: 0;
+      height: 100%;
+      background: var(--ink);
+      transition: width 0.25s ease;
+    }
+
+    #app:has(#kept-view:not([hidden])) .progress-bar > i { visibility: hidden; }
+
+    /* ---------- 選別: ポスト ---------- */
+
+    .card {
+      position: relative;
+      padding: 22px 26px 24px;
+      border-radius: 4px;
+      background: var(--surface);
+      box-shadow: 0 0 0 1px var(--line);
+    }
+
+    .card.entering { animation: card-in 0.16s ease-out; }
+
+    @keyframes card-in {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: none; }
+    }
+
+    .card.confirm-discard { box-shadow: 0 0 0 2px var(--cut); }
+
+    .card-head {
+      display: flex;
+      align-items: flex-start;
       gap: 12px;
-      margin-top: 20px;
-      align-items: end;
     }
 
-    .field {
+    .author {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 2px 10px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .author-name { font-weight: 700; }
+
+    .author-meta {
+      color: var(--ink-2);
+      font-size: 14px;
+    }
+
+    .open-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      width: 30px;
+      height: 30px;
+      margin: -4px -8px 0 0;
+      border-radius: 6px;
+      color: var(--ink-2);
+      font-size: 13px;
+      text-decoration: none;
+    }
+
+    .open-link:hover { color: var(--ink); background: var(--bg); }
+
+    .text {
+      max-width: 36em;
+      margin-top: 12px;
+      font-size: 18px;
+      line-height: 1.75;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .text a,
+    .kept-text a {
+      color: inherit;
+      text-decoration: underline;
+      text-decoration-color: var(--ink-2);
+      text-underline-offset: 3px;
+    }
+
+    .text a:hover,
+    .kept-text a:hover { text-decoration-color: currentColor; }
+
+    .images {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-top: 16px;
+    }
+
+    .images[data-count="0"] { display: none; }
+    .images[data-count="1"] { grid-template-columns: 1fr; }
+
+    .images img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      max-height: 300px;
+      border-radius: 4px;
+      background: var(--slot);
+      object-fit: contain;
+    }
+
+    .images[data-count="2"] img,
+    .images[data-count="3"] img,
+    .images[data-count="4"] img {
+      height: 200px;
+      object-fit: cover;
+    }
+
+    .images[data-count="1"] img { width: auto; max-width: 100%; }
+
+    .video-badge {
+      display: inline-flex;
+      gap: 6px;
+      margin: 12px 0 0;
+      padding: 4px 10px;
+      border-radius: 6px;
+      background: var(--slot);
+      color: var(--ink-2);
+      font-size: 13px;
+    }
+
+    .link-preview-wrap { margin-top: 14px; }
+    .link-preview-wrap:empty { display: none; }
+
+    .link-preview {
+      display: flex;
+      align-items: stretch;
+      overflow: hidden;
+      max-width: 36em;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .link-preview:hover { background: var(--bg); }
+
+    .link-preview-image {
+      width: 96px;
+      flex-shrink: 0;
+      object-fit: cover;
+      background: var(--slot);
+    }
+
+    .link-preview-body {
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      justify-content: center;
+      gap: 2px;
+      flex: 1;
       min-width: 0;
+      padding: 10px 14px;
     }
 
-    .field > span {
-      color: var(--muted);
-      font-size: 13px;
+    .link-preview-domain {
+      overflow: hidden;
+      color: var(--ink-2);
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .link-preview-title {
+      display: -webkit-box;
+      overflow: hidden;
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.5;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+
+    .kept-row .link-preview-image { width: 64px; }
+
+    /* ---------- 選別: 空のとき ---------- */
+
+    .empty-state {
+      padding: 40px 12px;
+      text-align: center;
+    }
+
+    .empty-title {
+      margin: 0;
+      font-size: 20px;
       font-weight: 700;
     }
 
-    select, input[type="text"], input[type="search"] {
+    .empty-sub {
+      margin: 8px auto 0;
+      max-width: 32em;
+      color: var(--ink-2);
+    }
+
+    .empty-sub a { color: inherit; text-underline-offset: 3px; }
+
+    /* ---------- 選別: 保存先の棚 ---------- */
+
+    /* 長いポストでも保存先と操作ボタンが画面内に残るよう、下に貼りつける */
+    .dock {
+      position: sticky;
+      bottom: 0;
+      z-index: 5;
+      margin-top: 8px;
+      padding: 14px 0 8px;
+      background: var(--bg);
+    }
+
+    .after-actions:has(#btn-undo[hidden]):has(.last-action:empty) { display: none; }
+    #sort-actions + .after-actions { margin-top: 8px; }
+
+
+    .rack {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(156px, 1fr));
+      gap: 6px;
+    }
+
+    /* 棚は 1 行: 番号・名前・件数。選んでいる棚だけ塗る */
+    .slot {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      min-width: 0;
+      height: 40px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: transparent;
+      text-align: left;
+    }
+
+    .slot:hover { background: var(--slot); }
+
+    .slot-key {
+      align-self: center;
+      font: 600 16px/1 var(--font-num);
+      color: var(--ink-2);
+    }
+
+    .slot-key.none { font-size: 13px; }
+
+    .slot-name {
+      align-self: center;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      font-size: 14px;
+      font-weight: 700;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .slot-count {
+      align-self: center;
+      color: var(--ink-2);
+      font: 12px var(--font-num);
+      font-variant-numeric: tabular-nums;
+      opacity: 0.8;
+    }
+
+    .slot[aria-pressed="true"] {
+      border-color: var(--ink);
+      background: var(--ink);
+      color: var(--on-strong);
+    }
+
+    .slot[aria-pressed="true"] .slot-key,
+    .slot[aria-pressed="true"] .slot-count { color: inherit; opacity: 0.75; }
+
+    .rack .add-folder-form {
+      height: 40px;
+      padding: 0 4px 0 6px;
+      border: 1px dashed var(--line);
+      border-radius: 4px;
+    }
+
+    .rack .add-folder-form:not(:focus-within) button { display: none; }
+
+    /* 保存した棚の件数が増えたことを一瞬だけ知らせる */
+    .slot.received { animation: slot-received 0.45s ease-out; }
+
+    @keyframes slot-received {
+      0% { box-shadow: 0 0 0 0 var(--save); }
+      30% { box-shadow: 0 0 0 3px var(--save); }
+      100% { box-shadow: 0 0 0 0 transparent; }
+    }
+
+    .add-folder-form {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .add-folder-form input {
       width: 100%;
-      padding: 10px 12px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: var(--input);
-      color: var(--text);
-      font: inherit;
-      font-size: 15px;
-      appearance: none;
-      -webkit-appearance: none;
+      min-width: 0;
+      padding: 6px 8px;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      background: transparent;
+      font-size: 13px;
     }
 
-    select {
-      border-radius: 10px;
-      padding-right: 36px;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238899a6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 12px center;
-      background-size: 16px;
+    .add-folder-form input:focus { border-color: var(--line); background: var(--surface); }
+
+    .add-folder-form button {
+      flex-shrink: 0;
+      padding: 5px 9px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--surface);
+      font-size: 12px;
+      font-weight: 700;
     }
 
-    ::placeholder {
-      color: var(--muted);
-      opacity: 1;
-    }
+    ::placeholder { color: var(--ink-2); opacity: 1; }
 
-    select:focus, input:focus, button:focus-visible, .tab-btn:focus-visible, .open-link:focus-visible, .text a:focus-visible, .kept-text a:focus-visible, .link-preview:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 2px;
-    }
+    /* ---------- 選別: 操作ボタン ---------- */
 
     .actions {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 12px;
+      grid-template-columns: 1fr 1fr 2fr;
+      gap: 8px;
       margin-top: 16px;
     }
 
     .action-btn {
+      position: relative;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
-      min-height: 48px;
-      padding: 12px;
-      border-radius: 10px;
-      border: 2px solid var(--border);
+      gap: 10px;
+      min-height: 54px;
+      padding: 10px 12px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 6px;
       background: var(--surface);
-      color: var(--text);
-      cursor: pointer;
-      font: inherit;
       font-size: 16px;
       font-weight: 700;
     }
 
-    .action-btn.discard { color: #ff8a90; border-color: var(--danger); }
-    .action-btn.discard:hover,
-    .action-btn.discard.armed { background: var(--danger); color: #fff; }
-    .action-btn.keep { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .action-btn.keep:hover { filter: brightness(1.08); }
-    .action-btn.skip:hover { background: var(--input); }
+    .action-btn:hover { background: var(--bg); }
+
+    .action-btn.discard { color: var(--cut); }
+
+    .action-btn.discard.armed {
+      border-color: var(--cut);
+      background: var(--cut);
+      color: var(--surface);
+    }
+
+    /* 2 秒の確認時間が減っていくのを見せる */
+    .action-btn.discard.armed::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      height: 3px;
+      width: 100%;
+      background: var(--surface);
+      opacity: 0.6;
+      transform-origin: left;
+      animation: arm-countdown 2s linear forwards;
+    }
+
+    @keyframes arm-countdown {
+      from { transform: scaleX(1); }
+      to { transform: scaleX(0); }
+    }
+
+    .action-btn.keep {
+      border-color: var(--save);
+      background: var(--save);
+      color: #fff;
+    }
+
+    .action-btn.keep:hover { background: var(--save-hover); }
+
+    .keep-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
 
     kbd {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-width: 1.6em;
-      padding: 2px 7px;
-      border: 1px solid var(--border);
+      min-width: 1.7em;
+      padding: 1px 6px;
+      border: 1px solid currentColor;
       border-radius: 4px;
-      background: var(--input);
-      color: var(--text);
-      font: 13px ui-monospace, Consolas, monospace;
+      font: 600 12px/1.5 var(--font-num);
+      opacity: 0.75;
     }
 
-    .guide {
-      margin-top: 14px;
-      color: var(--muted);
-      font-size: 14px;
+    .after-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 16px;
+      min-height: 32px;
+      color: var(--ink-2);
+      font-size: 13px;
     }
 
-    .empty-state {
-      margin: 0;
-      padding: 36px 12px;
-      text-align: center;
+    .last-action { min-width: 0; }
+
+    .text-btn {
+      padding: 2px 0;
+      border: 0;
+      background: none;
+      color: var(--ink-2);
+      font-size: 13px;
+      text-decoration: underline;
+      text-underline-offset: 3px;
     }
 
-    .empty-icon { font-size: 28px; margin-bottom: 8px; }
-    .empty-title { margin: 0; font-size: 20px; font-weight: 700; }
-    .empty-sub { margin: 8px 0 0; color: var(--muted); font-size: 15px; }
+    /* ---------- 保存済み ---------- */
 
     .kept-layout {
       display: grid;
-      grid-template-columns: 260px minmax(0, 1fr);
-      gap: 16px;
-      margin-top: 20px;
+      grid-template-columns: 220px minmax(0, 1fr);
+      gap: 32px;
+      margin-top: 4px;
       align-items: start;
     }
 
     .folder-pane {
-      padding: 12px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 16px;
+      position: sticky;
+      top: 16px;
     }
 
-    .folder-pane h2 {
-      margin: 0 0 10px;
+    .pane-title {
+      margin: 0 0 8px;
+      color: var(--ink-2);
       font-size: 13px;
       font-weight: 700;
-      color: var(--muted);
     }
 
     .folder-list {
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 2px;
       margin: 0 0 12px;
       padding: 0;
       list-style: none;
     }
 
     .folder-row {
+      position: relative;
       display: flex;
       align-items: center;
-      gap: 4px;
     }
 
     .folder-item {
@@ -525,244 +687,257 @@
       gap: 8px;
       flex: 1;
       min-width: 0;
-      padding: 10px 14px;
+      padding: 8px 10px;
       border: 0;
-      border-radius: 999px;
-      background: transparent;
-      color: var(--text);
-      cursor: pointer;
-      font: inherit;
-      font-size: 15px;
+      border-radius: 4px;
+      background: none;
       text-align: left;
     }
 
-    .folder-item:hover { background: var(--input); }
-    .folder-item.active { background: var(--accent); color: #fff; }
-    .folder-item.active:hover { background: #1a8cd8; }
+    .folder-item:hover { background: var(--slot); }
+
+    .folder-item.active {
+      background: var(--ink);
+      color: var(--on-strong);
+    }
 
     .folder-item-name {
       flex: 1;
       min-width: 0;
       overflow: hidden;
+      font-weight: 700;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
 
     .folder-item-count {
-      color: var(--muted);
+      color: var(--ink-2);
+      font: 13px var(--font-num);
       font-variant-numeric: tabular-nums;
-      font-size: 13px;
     }
 
-    .folder-item.active .folder-item-count {
-      color: inherit;
-      opacity: 0.85;
-    }
+    .folder-item.active .folder-item-count { color: inherit; opacity: 0.7; }
 
     .folder-delete {
+      position: absolute;
+      right: 4px;
+      top: 50%;
+      transform: translateY(-50%);
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 28px;
-      height: 28px;
+      flex-shrink: 0;
+      width: 30px;
+      height: 30px;
       padding: 0;
       border: 0;
-      border-radius: 999px;
-      background: transparent;
-      color: var(--muted);
-      cursor: pointer;
+      border-radius: 4px;
+      background: none;
+      color: var(--ink-2);
       opacity: 0;
-      flex-shrink: 0;
     }
 
     .folder-row:hover .folder-delete,
-    .folder-row:focus-within .folder-delete {
-      opacity: 0.7;
-    }
+    .folder-delete:focus-visible { opacity: 1; }
 
-    .folder-delete:hover,
-    .folder-delete:focus-visible {
-      opacity: 1;
-      color: var(--danger);
-      background: var(--danger-soft);
-    }
+    /* 削除ボタンが出ている間は、その下の件数を隠す */
+    .folder-row:hover:has(.folder-delete) .folder-item-count,
+    .folder-row:has(.folder-delete:focus-visible) .folder-item-count { visibility: hidden; }
+
+    .folder-item.active + .folder-delete { color: var(--on-strong); }
+
+    .folder-delete:hover { color: var(--cut); background: var(--cut-soft); }
 
     @media (hover: none) {
-      .folder-delete { opacity: 0.55; }
+      .folder-delete { position: static; transform: none; opacity: 0.7; }
     }
 
-    .add-folder-form {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 6px;
+    .folder-delete svg,
+    .open-link svg,
+    .kept-open svg {
+      display: block;
+      width: 15px;
+      height: 15px;
     }
 
-    .add-folder-form button {
-      padding: 10px 14px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: var(--input);
-      color: var(--text);
-      cursor: pointer;
-      font: inherit;
-      font-size: 13px;
-      font-weight: 700;
+    .folder-pane .add-folder-form input {
+      border-color: var(--line);
+      padding: 7px 10px;
     }
 
     .kept-main { min-width: 0; }
 
-    .kept-search {
-      margin-bottom: 16px;
+    .kept-search { display: block; margin-bottom: 20px; }
+
+    .kept-search input {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface);
+      font-size: 15px;
     }
 
-    .kept-search input[type="search"] {
-      background: var(--input);
-      border-color: transparent;
-      padding: 12px 16px;
-    }
-
-    .kept-search input[type="search"]:hover,
-    .kept-search input[type="search"]:focus {
-      background: #273340;
+    .kept-title {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      margin: 0 0 4px;
     }
 
     .kept-heading {
-      margin: 0 0 12px;
-      font-size: 18px;
+      margin: 0;
+      font-size: 20px;
       font-weight: 700;
     }
 
+    .kept-total {
+      color: var(--ink-2);
+      font: 14px var(--font-num);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .kept-list:empty { display: none; }
+
+    .kept-list {
+      display: flex;
+      flex-direction: column;
+      border-top: 1px solid var(--line);
+    }
+
+    .kept-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 16px 4px 16px 0;
+      border-bottom: 1px solid var(--line);
+      cursor: pointer;
+    }
+
+    .kept-row:hover { background: color-mix(in srgb, var(--surface) 55%, transparent); }
+
+    .kept-body {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .kept-body > * { max-width: 100%; }
+
+    .kept-head {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .kept-head .author { font-size: 14px; }
+
+    .kept-text {
+      display: -webkit-box;
+      overflow: hidden;
+      max-width: 40em;
+      line-height: 1.7;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+    }
+
+    .kept-row .link-preview-wrap { margin-top: 6px; }
+
     .kept-folder-badge {
-      display: inline-block;
-      margin-top: 8px;
-      padding: 2px 8px;
-      border-radius: 999px;
-      background: var(--input);
-      color: var(--muted);
+      margin-top: 4px;
+      padding: 1px 8px;
+      border-radius: 4px;
+      background: var(--slot);
+      color: var(--ink-2);
       font-size: 12px;
       font-weight: 700;
     }
 
-    .kept-list {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 12px;
+    .kept-edit {
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
     }
+
+    .kept-open {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      color: var(--ink-2);
+      font-size: 13px;
+      text-decoration: none;
+    }
+
+    .kept-open:hover { color: var(--ink); background: var(--slot); }
+
+    .kept-edit select {
+      max-width: 160px;
+      padding: 5px 28px 5px 10px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23808c8f' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") no-repeat right 9px center;
+      color: var(--ink-2);
+      font-size: 13px;
+      appearance: none;
+    }
+
+    .kept-list + .empty-state,
+    .kept-empty { margin-top: 8px; }
 
     .kept-more {
       display: block;
       width: 100%;
       margin-top: 16px;
       padding: 12px;
-      border-radius: 10px;
-      border: 1px solid var(--border);
+      border: 1px solid var(--line);
+      border-radius: 6px;
       background: var(--surface);
-      color: var(--text);
-      cursor: pointer;
-      font: inherit;
-      font-size: 15px;
       font-weight: 700;
     }
 
-    .kept-more:hover {
-      background: var(--surface-hover);
-    }
+    .kept-more:hover { background: var(--slot); }
 
-    .kept-more[hidden] { display: none; }
+    /* ---------- トースト・確認ダイアログ（src/dashboard/notify.ts） ---------- */
 
-    .kept-row {
-      padding: 16px 18px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      cursor: pointer;
-      transition: background 0.12s ease, border-color 0.12s ease;
-    }
-
-    .kept-row:hover {
-      background: var(--surface-hover);
-      border-color: #3d5466;
-    }
-
-    .kept-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 8px;
-    }
-
-    .kept-text {
-      margin-top: 8px;
-      font-size: 15px;
-      line-height: 1.6;
-      color: var(--text);
-      display: -webkit-box;
-      -webkit-line-clamp: 4;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-    }
-
-    .kept-edit {
-      margin-top: 12px;
-    }
-
-    .kept-edit select {
-      padding: 8px 32px 8px 10px;
-      font-size: 13px;
-      color: var(--muted);
-      background-color: var(--input);
-      border-color: transparent;
-    }
-
-    @media (min-width: 900px) {
-      .kept-list { grid-template-columns: 1fr 1fr; }
-    }
-
-    @media (max-width: 800px) {
-      .kept-layout { grid-template-columns: 1fr; }
-    }
-
-    @media (max-width: 700px) {
-      #app { padding: 12px 14px 32px; }
-      .header-actions { margin-left: 0; width: 100%; justify-content: space-between; }
-      .actions { grid-template-columns: 1fr; }
-      .images[data-count="2"] img,
-      .images[data-count="3"] img,
-      .images[data-count="4"] img {
-        max-width: 100%;
-      }
-    }
-
-    /* トースト通知（src/dashboard/notify.ts） */
     .toast-area {
       position: fixed;
-      right: 20px;
+      left: 50%;
       bottom: 20px;
       z-index: 1000;
       display: flex;
       flex-direction: column;
+      align-items: center;
       gap: 8px;
-      max-width: min(360px, calc(100vw - 32px));
+      width: max-content;
+      max-width: min(440px, calc(100vw - 32px));
+      transform: translateX(-50%);
     }
 
     .toast {
-      padding: 10px 14px;
-      border-radius: 10px;
-      border: 1px solid var(--border);
-      border-left: 4px solid var(--accent);
-      background: var(--surface);
-      color: var(--text);
+      padding: 10px 16px;
+      border-radius: 6px;
+      background: var(--ink);
+      color: var(--on-strong);
       font-size: 14px;
-      line-height: 1.5;
-      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+      box-shadow: 0 8px 24px rgba(10, 20, 22, 0.25);
       cursor: pointer;
       overflow-wrap: anywhere;
     }
 
-    .toast-success { border-left-color: var(--keep); }
-    .toast-error { border-left-color: var(--danger); }
+    .toast-success { background: var(--save); color: #fff; }
+    .toast-error { background: var(--cut); color: #fff; }
 
-    /* 確認ダイアログ（src/dashboard/notify.ts） */
+    @media (prefers-color-scheme: dark) {
+      .toast-error { color: #1d1210; }
+    }
+
     .modal-backdrop {
       position: fixed;
       inset: 0;
@@ -771,23 +946,20 @@
       align-items: center;
       justify-content: center;
       padding: 16px;
-      background: rgba(0, 0, 0, 0.6);
+      background: rgba(12, 20, 22, 0.5);
     }
 
     .modal {
       width: min(420px, 100%);
-      padding: 20px;
-      border-radius: 16px;
-      border: 1px solid var(--border);
+      padding: 22px;
+      border-radius: 6px;
       background: var(--surface);
-      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+      box-shadow: 0 16px 40px rgba(10, 20, 22, 0.3);
     }
 
     .modal-message {
-      margin: 0 0 18px;
-      color: var(--text);
-      font-size: 15px;
-      line-height: 1.6;
+      margin: 0 0 20px;
+      line-height: 1.7;
       white-space: pre-wrap;
     }
 
@@ -799,115 +971,145 @@
 
     .modal-btn {
       padding: 8px 16px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: transparent;
-      color: var(--text);
-      cursor: pointer;
-      font: inherit;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: none;
       font-size: 14px;
       font-weight: 700;
     }
 
-    .modal-btn:hover { background: var(--surface-hover); }
-    .modal-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-    .modal-btn-primary { border-color: var(--accent); background: var(--accent); color: #fff; }
-    .modal-btn-primary:hover { background: #1a8cd8; }
-    .modal-btn-danger { border-color: var(--danger); background: var(--danger); color: #fff; }
-    .modal-btn-danger:hover { background: #dc1e29; }
+    .modal-btn:hover { background: var(--slot); }
+    .modal-btn-primary { border-color: var(--save); background: var(--save); color: #fff; }
+    .modal-btn-primary:hover { background: var(--save-hover); }
+    .modal-btn-danger { border-color: var(--cut); background: var(--cut); color: var(--surface); }
+    .modal-btn-danger:hover { filter: brightness(1.08); background: var(--cut); }
+
+    /* ---------- 狭い画面 ---------- */
+
+    @media (max-width: 720px) {
+      #app { padding: 14px 14px 32px; }
+      .header-actions { margin-left: 0; }
+      .card { padding: 18px 16px 20px; }
+      .text { font-size: 16px; }
+      .actions { grid-template-columns: 1fr 1fr; }
+      .action-btn.keep { grid-column: 1 / -1; grid-row: 1; }
+      .kept-layout { grid-template-columns: 1fr; gap: 16px; }
+      .folder-pane { position: static; }
+      .kept-row { flex-direction: column; gap: 10px; }
+      .kept-edit { width: 100%; flex-direction: row-reverse; justify-content: space-between; align-items: center; }
+      .dock { position: static; }
+      .rack { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
   </style>
 </head>
 <body>
   <div id="app">
     <header>
       <h1>Bookmark Sorter</h1>
-      <div class="counts">
-        <span>未整理<strong id="remaining-count">0</strong></span>
-        <span>保存済み<strong id="kept-count">0</strong></span>
-      </div>
+      <nav class="view-tabs" aria-label="画面の切り替え">
+        <button type="button" id="tab-sort" class="tab-btn active">選別<span id="remaining-count" class="tab-count" title="未整理の件数">0</span></button>
+        <button type="button" id="tab-kept" class="tab-btn">保存済み<span id="kept-count" class="tab-count">0</span></button>
+      </nav>
       <div class="header-actions">
-        <div class="view-tabs">
-          <button type="button" id="tab-sort" class="tab-btn active">選別</button>
-          <button type="button" id="tab-kept" class="tab-btn">保存済み</button>
-        </div>
-        <button type="button" id="unbookmark-failed-btn" class="sub-btn warn" hidden title="Twitter 側のブックマーク解除に失敗したポストをもう一度解除します"></button>
-        <button type="button" id="export-btn" class="sub-btn" title="すべてのデータを JSON ファイルに保存します">エクスポート</button>
-        <button type="button" id="import-btn" class="sub-btn" title="エクスポートした JSON ファイルから読み込みます">インポート</button>
+        <button type="button" id="unbookmark-failed-btn" class="warn-btn" hidden title="Twitter 側のブックマーク解除に失敗したポストをもう一度解除します"></button>
+        <details class="data-menu" id="data-menu">
+          <summary>データ</summary>
+          <div class="menu-panel">
+            <button type="button" id="export-btn" class="menu-item">エクスポート<small>すべてのデータを JSON ファイルに保存します</small></button>
+            <button type="button" id="import-btn" class="menu-item">インポート<small>エクスポートした JSON ファイルから読み込みます</small></button>
+            <div class="menu-sep" role="separator"></div>
+            <button type="button" id="clear-all-btn" class="menu-item danger">データを全消去<small>取り消せません。先にエクスポートしてください</small></button>
+          </div>
+        </details>
         <input type="file" id="import-file" accept="application/json,.json" hidden />
-        <button type="button" id="clear-all-btn" class="danger-btn">データを全消去</button>
       </div>
     </header>
+    <div class="progress-bar" aria-hidden="true"><i id="progress-fill"></i></div>
 
     <main>
-      <section id="sort-view">
+      <section id="sort-view" aria-label="選別">
         <article class="card" id="tweet-card">
           <div id="card-empty" class="empty-state" hidden>
-            <div class="empty-icon">✓</div>
-            <p class="empty-title">選別が完了しました</p>
-            <p class="empty-sub">保存済みタブのフォルダから見返せます</p>
+            <p class="empty-title" id="empty-title">未整理のポストはありません</p>
+            <p class="empty-sub" id="empty-sub">保存したポストは「保存済み」から見返せます</p>
           </div>
           <div id="card-body">
             <div class="card-head">
-              <div class="author" id="card-author">読み込み中...</div>
-              <a id="card-open-link" class="open-link" href="#" target="_blank" rel="noopener noreferrer" title="Twitterで開く（O）">
+              <div class="author" id="card-author">読み込み中…</div>
+              <a id="card-open-link" class="open-link" href="#" target="_blank" rel="noopener noreferrer" title="元ポストを開く（O）">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M14 5h5v5"/>
                   <path d="M20 4l-9 9"/>
                   <path d="M11 5H6a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5"/>
                 </svg>
-                <span class="visually-hidden">Twitterで開く（O）</span>
+                <span class="visually-hidden">元ポストを開く（O）</span>
               </a>
             </div>
             <div class="text" id="card-text"></div>
             <div class="images" id="card-images" data-count="0"></div>
-            <p id="card-video" class="video-badge" hidden>▶ 動画あり（<kbd>O</kbd> で元ポストを開いて再生）</p>
+            <p id="card-video" class="video-badge" hidden>動画つき。再生は元ポストで（<kbd>O</kbd>）</p>
             <div class="link-preview-wrap" id="card-link-preview"></div>
-            <p id="discard-hint" class="discard-hint">もう一度 ← を押すと削除します（Esc でキャンセル）</p>
-            <div class="controls">
-              <label class="field">
-                <span>保存先フォルダ（1–9）</span>
-                <select id="folder-select">
-                  <option value="未分類" selected>1  未分類</option>
-                </select>
-              </label>
-              <form id="sort-add-folder-form" class="add-folder-form">
-                <input id="sort-add-folder-input" type="text" maxlength="40" placeholder="新しいフォルダ名" />
-                <button type="submit">追加</button>
-              </form>
-            </div>
           </div>
         </article>
 
-        <div class="actions" id="sort-actions" hidden>
-          <button type="button" id="btn-discard" class="action-btn discard">削除 <kbd>←</kbd></button>
-          <button type="button" id="btn-skip" class="action-btn skip">スキップ <kbd>↓</kbd></button>
-          <button type="button" id="btn-keep" class="action-btn keep">保存 <kbd>→</kbd></button>
-        </div>
+        <div class="dock">
+          <div id="sort-actions" hidden>
+            <div class="rack" id="folder-rack" role="group" aria-label="保存先（数字キーで切り替え）">
+              <form id="sort-add-folder-form" class="add-folder-form">
+                <input id="sort-add-folder-input" type="text" maxlength="40" placeholder="＋ フォルダを追加" aria-label="新しいフォルダ名" />
+                <button type="submit">追加</button>
+              </form>
+            </div>
+            <!-- 保存先の値はこの select が持つ（棚のボタンはこれを書き換える） -->
+            <select id="folder-select" class="visually-hidden" tabindex="-1" aria-hidden="true">
+              <option value="未分類" selected>未分類</option>
+            </select>
 
-        <p class="guide">Z: 取り消し　／　1–9: フォルダ　／　フォルダ選択中は Enter で保存　／　新しいフォルダ名は Enter で追加　／　削除は ← を2回</p>
+            <div class="actions">
+              <button type="button" id="btn-discard" class="action-btn discard" title="2回押すと削除します。1回目のあとは Esc でやめられます"><kbd aria-hidden="true">←</kbd><span id="discard-label">削除</span></button>
+              <button type="button" id="btn-skip" class="action-btn skip"><kbd aria-hidden="true">↓</kbd>スキップ</button>
+              <button type="button" id="btn-keep" class="action-btn keep"><span class="keep-label" id="keep-label">未分類に保存</span><kbd aria-hidden="true">→</kbd></button>
+            </div>
+          </div>
+
+          <div class="after-actions">
+            <span class="last-action" id="last-action" aria-live="polite"></span>
+            <button type="button" id="btn-undo" class="text-btn" hidden>取り消す（Z）</button>
+          </div>
+        </div>
       </section>
 
-      <section id="kept-view" hidden>
+      <section id="kept-view" aria-label="保存済み" hidden>
         <div class="kept-layout">
           <aside class="folder-pane">
-            <h2>フォルダ</h2>
+            <h2 class="pane-title">フォルダ</h2>
             <ul id="folder-list" class="folder-list"></ul>
             <form id="add-folder-form" class="add-folder-form">
-              <input id="add-folder-input" type="text" maxlength="40" placeholder="新しいフォルダ名" />
+              <input id="add-folder-input" type="text" maxlength="40" placeholder="新しいフォルダ名" aria-label="新しいフォルダ名" />
               <button type="submit">追加</button>
             </form>
           </aside>
           <div class="kept-main">
-            <label class="field kept-search">
-              <span>ツイートを検索</span>
-              <input id="kept-search" type="search" placeholder="本文・投稿者名" />
+            <label class="kept-search">
+              <span class="visually-hidden">保存済みを検索</span>
+              <input id="kept-search" type="search" placeholder="本文・投稿者名で検索" />
             </label>
-            <h2 id="kept-heading" class="kept-heading">未分類</h2>
-            <div id="kept-empty" class="empty-state card" hidden>
-              <p class="empty-title">保存済みはまだありません</p>
-              <p class="empty-sub">選別タブで → を押すとここに溜まります</p>
+            <div class="kept-title">
+              <h2 id="kept-heading" class="kept-heading">未分類</h2>
+              <span id="kept-total" class="kept-total"></span>
             </div>
             <div id="kept-list" class="kept-list"></div>
+            <div id="kept-empty" class="empty-state kept-empty" hidden>
+              <p class="empty-title">このフォルダは空です</p>
+              <p class="empty-sub">選別で → を押すと、選んでいるフォルダに保存されます</p>
+            </div>
             <button type="button" id="kept-more" class="kept-more" hidden>さらに表示</button>
           </div>
         </div>
