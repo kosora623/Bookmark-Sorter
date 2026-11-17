@@ -74,6 +74,18 @@ function fakeBackground(message: ExtensionRequest): unknown {
     case 'unbookmark':
     case 'cancel_unbookmark':
       return { ok: true };
+    case 'add_folder': {
+      const name = message.name.trim();
+      if (!name) return { ok: false, error: 'フォルダ名を入力してください', folders: folderInfos() };
+      if (folderNames.includes(name)) return { ok: false, error: '同じ名前のフォルダがあります', folders: folderInfos() };
+      folderNames.push(name);
+      return { ok: true, folders: folderInfos() };
+    }
+    case 'delete_folder': {
+      folderNames.splice(folderNames.indexOf(message.name), 1);
+      for (const p of posts.values()) if (p.folder === message.name) p.folder = DEFAULT_FOLDER;
+      return { ok: true, folders: folderInfos() };
+    }
     default:
       throw new Error(`テストで用意していない action: ${message.action}`);
   }
@@ -87,13 +99,20 @@ function press(key: string): void {
   document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
 }
 
+function toastTexts(): string[] {
+  return [...document.querySelectorAll('.toast')].map((t) => t.textContent ?? '');
+}
+
+function folderItems(): string[] {
+  return [...document.querySelectorAll<HTMLElement>('#folder-list .folder-item')].map((el) => el.dataset.folder ?? '');
+}
+
 function cardText(): string {
   return document.getElementById('card-text')?.textContent ?? '';
 }
 
 beforeAll(async () => {
   installInnerText();
-  window.alert = vi.fn();
 
   const html = readFileSync(resolve(__dirname, '../index.html'), 'utf-8');
   const body = html.slice(html.indexOf('<body>') + '<body>'.length, html.indexOf('</body>'));
@@ -203,5 +222,44 @@ describe('ダッシュボード', () => {
     await vi.waitFor(() => expect(document.querySelectorAll('#kept-list .kept-row')).toHaveLength(1));
     expect(lastSent('list_kept')).toMatchObject({ folder: '技術' });
     expect(document.getElementById('kept-heading')?.textContent).toBe('技術');
+  });
+
+  it('同じ名前のフォルダは追加できず、理由をトーストで知らせる', async () => {
+    const input = document.getElementById('add-folder-input') as HTMLInputElement;
+    input.value = '技術';
+    document.getElementById('add-folder-form')?.dispatchEvent(new Event('submit', { cancelable: true }));
+
+    await vi.waitFor(() => expect(toastTexts()).toContain('同じ名前のフォルダがあります'));
+    expect(document.querySelector('.toast-error')).not.toBeNull();
+    expect(folderItems()).toEqual([DEFAULT_FOLDER, '技術']);
+  });
+
+  it('フォルダを追加すると一覧に出て、そのフォルダを開く', async () => {
+    const input = document.getElementById('add-folder-input') as HTMLInputElement;
+    input.value = '料理';
+    document.getElementById('add-folder-form')?.dispatchEvent(new Event('submit', { cancelable: true }));
+
+    await vi.waitFor(() => expect(folderItems()).toEqual([DEFAULT_FOLDER, '技術', '料理']));
+    expect(input.value).toBe('');
+    await vi.waitFor(() => expect(lastSent('list_kept')).toMatchObject({ folder: '料理' }));
+  });
+
+  it('フォルダの削除は確認ダイアログを挟み、キャンセルなら何もしない', async () => {
+    const deleteButton = (): HTMLElement | null =>
+      document.querySelector<HTMLElement>('#folder-list [data-action="delete-folder"][data-folder="料理"]');
+
+    deleteButton()?.click();
+    await vi.waitFor(() => expect(document.querySelector('.modal')).not.toBeNull());
+    expect(document.querySelector('.modal')?.textContent).toContain('フォルダ「料理」を削除します');
+    document.querySelector<HTMLButtonElement>('.modal button[data-role="cancel"]')?.click();
+    await vi.waitFor(() => expect(document.querySelector('.modal')).toBeNull());
+    expect(lastSent('delete_folder')).toBeUndefined();
+
+    deleteButton()?.click();
+    await vi.waitFor(() => expect(document.querySelector('.modal')).not.toBeNull());
+    document.querySelector<HTMLButtonElement>('.modal button[data-role="confirm"]')?.click();
+
+    await vi.waitFor(() => expect(folderItems()).toEqual([DEFAULT_FOLDER, '技術']));
+    expect(lastSent('delete_folder')).toEqual({ action: 'delete_folder', name: '料理' });
   });
 });

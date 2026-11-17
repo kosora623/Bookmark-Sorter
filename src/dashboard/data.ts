@@ -1,6 +1,7 @@
 // データ全体の操作（エクスポート・インポート・全消去）と、解除に失敗したポストの表示
 import { sendMessage } from './api';
 import { localDateStamp } from './dom';
+import { confirmDialog, showToast } from './notify';
 
 export async function updateUnbookmarkFailures(): Promise<void> {
   const btn = document.getElementById('unbookmark-failed-btn');
@@ -13,7 +14,7 @@ export async function updateUnbookmarkFailures(): Promise<void> {
 export async function retryUnbookmarkFailures(): Promise<void> {
   const { queued } = await sendMessage({ action: 'retry_unbookmark_failures' });
   await updateUnbookmarkFailures();
-  window.alert(queued > 0 ? `${queued}件の解除を再試行します` : '再試行が必要なポストはありません');
+  showToast(queued > 0 ? `${queued}件の解除を再試行します` : '再試行が必要なポストはありません');
 }
 
 export async function exportAllData(): Promise<void> {
@@ -35,13 +36,15 @@ export async function importFromFile(file: File): Promise<number | null> {
   try {
     data = JSON.parse(await file.text());
   } catch {
-    window.alert('JSON として読み込めませんでした');
+    showToast('JSON として読み込めませんでした', 'error');
     return null;
   }
 
-  const confirmed = confirm(
-    'ファイルの内容を読み込みます。同じポストがすでにある場合は、ファイルの内容（状態・フォルダ）で上書きします。よろしいですか？'
-  );
+  const confirmed = await confirmDialog({
+    message:
+      'ファイルの内容を読み込みます。同じポストがすでにある場合は、ファイルの内容（状態・フォルダ）で上書きします。よろしいですか？',
+    confirmLabel: '読み込む'
+  });
   if (!confirmed) return null;
 
   const response = await sendMessage({
@@ -49,7 +52,7 @@ export async function importFromFile(file: File): Promise<number | null> {
     data
   });
   if (!response.ok) {
-    window.alert(response.error || 'インポートできませんでした');
+    showToast(response.error || 'インポートできませんでした', 'error');
     return null;
   }
 
@@ -58,7 +61,11 @@ export async function importFromFile(file: File): Promise<number | null> {
 
 /** 確認のうえ全データを消す。消したら true */
 export async function clearAllData(): Promise<boolean> {
-  const confirmed = confirm('すべてのブックマークデータを消去します。この操作は取り消せません。よろしいですか？');
+  const confirmed = await confirmDialog({
+    message: 'すべてのブックマークデータを消去します。この操作は取り消せません。よろしいですか？',
+    confirmLabel: '全消去する',
+    danger: true
+  });
   if (!confirmed) return false;
 
   await sendMessage({ action: 'clear_bookmarks' });

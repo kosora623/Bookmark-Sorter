@@ -1,6 +1,7 @@
 // 選別・保存済みの両方の画面から参照する状態
 import type { FolderInfo } from '../messages';
 import { isContextInvalidatedError } from '../runtime';
+import { showToast } from './notify';
 
 export type ViewMode = 'sort' | 'kept';
 
@@ -25,7 +26,7 @@ export async function runExclusive(task: () => Promise<void>): Promise<void> {
     if (isContextInvalidatedError(error)) return;
     console.error(error);
     const detail = error instanceof Error ? error.message : String(error);
-    window.alert(`処理に失敗しました: ${detail}`);
+    showToast(`処理に失敗しました: ${detail}`, 'error');
   } finally {
     state.isBusy = false;
   }

@@ -10,6 +10,7 @@ import {
   updateUnbookmarkFailures
 } from './dashboard/data';
 import { loadFolders, sortFolderSelect } from './dashboard/folders';
+import { showToast } from './dashboard/notify';
 import { addFolderFromInput, bindKeptView, loadKeptView, resetKeptState } from './dashboard/kept-view';
 import { bindSortView, clearDiscardArm, loadNextPost, resetSortState } from './dashboard/sort-view';
 import { runExclusive, state, type ViewMode } from './dashboard/state';
@@ -89,7 +90,7 @@ document.getElementById('import-file')?.addEventListener('change', (e) => {
     const imported = await importFromFile(file);
     if (imported === null) return;
     await reloadAll();
-    window.alert(`${imported}件を読み込みました`);
+    showToast(`${imported}件を読み込みました`, 'success');
   });
 });
 

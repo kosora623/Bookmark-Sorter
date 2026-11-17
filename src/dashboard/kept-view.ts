@@ -6,6 +6,7 @@ import { logUnexpected } from '../runtime';
 import { openTweet, saveLastFolder, sendMessage } from './api';
 import { createIcon, fillAuthor, fillTextWithLinks, renderLinkPreview } from './dom';
 import { adjustFolderCount, loadFolders, populateFolderSelect, sortFolderSelect } from './folders';
+import { confirmDialog, showToast } from './notify';
 import { runExclusive, state } from './state';
 
 const SEARCH_DEBOUNCE_MS = 150;
@@ -254,7 +255,7 @@ export async function addFolderFromInput(input: HTMLInputElement | null, selectA
 
   state.folders = response.folders;
   if (!response.ok) {
-    window.alert(response.error || 'フォルダを追加できませんでした');
+    showToast(response.error || 'フォルダを追加できませんでした', 'error');
     return;
   }
 
@@ -275,7 +276,11 @@ export async function addFolderFromInput(input: HTMLInputElement | null, selectA
 }
 
 async function removeFolder(name: string): Promise<void> {
-  const confirmed = confirm(`フォルダ「${name}」を削除します。中のポストは「${DEFAULT_FOLDER}」へ移します。よろしいですか？`);
+  const confirmed = await confirmDialog({
+    message: `フォルダ「${name}」を削除します。中のポストは「${DEFAULT_FOLDER}」へ移します。よろしいですか？`,
+    confirmLabel: '削除する',
+    danger: true
+  });
   if (!confirmed) return;
 
   const response = await sendMessage({
@@ -284,7 +289,7 @@ async function removeFolder(name: string): Promise<void> {
   });
 
   if (!response.ok) {
-    window.alert(response.error || 'フォルダを削除できませんでした');
+    showToast(response.error || 'フォルダを削除できませんでした', 'error');
     return;
   }
 
