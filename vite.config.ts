@@ -39,6 +39,13 @@ export default defineConfig({
       },
       output: {
         entryFileNames: 'assets/[name].js',
+        // content script は web_accessible_resources に載せたチャンクしか import できない。
+        // content から使う共有モジュールは名前を固定した shared チャンクにまとめる（Dexie は入れない）。
+        manualChunks(id) {
+          const shared = ['src/constants.ts', 'src/urls.ts', 'src/runtime.ts'];
+          const normalized = id.replace(/\\/g, '/');
+          return shared.some((file) => normalized.endsWith(file)) ? 'shared' : undefined;
+        },
       },
     },
   },

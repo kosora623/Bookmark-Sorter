@@ -1,5 +1,8 @@
-import { DEFAULT_FOLDER, type BookmarkPost } from './db';
+import { DEFAULT_FOLDER } from './constants';
+import type { BookmarkPost } from './db';
 import type { BookmarkChanges, ExportData, ExtensionRequest, FolderInfo, UnbookmarkFailure } from './messages';
+import { sanitizeFolderName } from './normalize';
+import { isContextInvalidatedError, isExtensionAlive, logUnexpected } from './runtime';
 import { isHttpUrl } from './urls';
 
 type ViewMode = 'sort' | 'kept';
@@ -32,19 +35,6 @@ let discardArmedId: string | null = null;
 let discardArmTimer: ReturnType<typeof setTimeout> | null = null;
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
-function isContextInvalidatedError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes('Extension context invalidated');
-}
-
-function isExtensionAlive(): boolean {
-  try {
-    return typeof chrome.runtime.id === 'string';
-  } catch {
-    return false;
-  }
-}
-
 function sendMessage<T>(message: ExtensionRequest): Promise<T> {
   if (!isExtensionAlive()) {
     return Promise.reject(new Error('Extension context invalidated'));
@@ -58,11 +48,7 @@ function sendMessage<T>(message: ExtensionRequest): Promise<T> {
 }
 
 function sendQuietly(message: ExtensionRequest): void {
-  void sendMessage(message).catch((error: unknown) => {
-    if (!isContextInvalidatedError(error)) {
-      console.error(error);
-    }
-  });
+  void sendMessage(message).catch(logUnexpected);
 }
 
 function clonePost(post: BookmarkPost): BookmarkPost {
@@ -252,9 +238,7 @@ function resetLocalState(): void {
     searchTimer = null;
   }
   clearDiscardArm();
-
-  const searchInput = document.getElementById('kept-search') as HTMLInputElement | null;
-  if (searchInput) searchInput.value = '';
+  clearSearchInput();
 }
 
 function pushUndo(entry: UndoEntry): void {
@@ -293,15 +277,9 @@ function isDiscardArmed(): boolean {
 function openTweet(url: string): void {
   if (!url || !isHttpUrl(url)) return;
   try {
-    void chrome.tabs.create({ url }).catch((error: unknown) => {
-      if (!isContextInvalidatedError(error)) {
-        console.error(error);
-      }
-    });
+    void chrome.tabs.create({ url }).catch(logUnexpected);
   } catch (error) {
-    if (!isContextInvalidatedError(error)) {
-      console.error(error);
-    }
+    logUnexpected(error);
   }
 }
 
@@ -381,11 +359,7 @@ async function loadNextPost(): Promise<void> {
   clearDiscardArm();
   showEmptyState(false);
   renderCard(currentPost);
-  void refillQueue().catch((error: unknown) => {
-    if (!isContextInvalidatedError(error)) {
-      console.error(error);
-    }
-  });
+  void refillQueue().catch(logUnexpected);
   await updateCount();
 }
 
@@ -453,9 +427,12 @@ async function updateCurrent(changes: BookmarkChanges): Promise<void> {
   });
 }
 
+function sortFolderSelect(): HTMLSelectElement | null {
+  return document.getElementById('folder-select') as HTMLSelectElement | null;
+}
+
 function selectedSortFolder(): string {
-  const folderSelect = document.getElementById('folder-select') as HTMLSelectElement | null;
-  return folderSelect?.value || DEFAULT_FOLDER;
+  return sortFolderSelect()?.value || DEFAULT_FOLDER;
 }
 
 async function keepCurrentPost(): Promise<void> {
@@ -495,37 +472,24 @@ async function undoLast(): Promise<void> {
   const entry = undoStack.pop();
   if (!entry) return;
 
-  if (currentPost && currentPost.id !== entry.post.id) {
-    const displaced = currentPost;
-    const without = postQueue.filter((post) => post.id !== displaced.id && post.id !== entry.post.id);
-    postQueue.length = 0;
-    postQueue.push(displaced, ...without);
-  } else {
-    const without = postQueue.filter((post) => post.id !== entry.post.id);
-    postQueue.length = 0;
-    postQueue.push(...without);
-  }
-
-  if (entry.type === 'skipped') {
-    skippedIds.delete(entry.post.id);
-    showPost(entry.post);
-    await updateCount();
-    return;
-  }
-
-  if (entry.type === 'discarded') {
-    cancelScheduledUnbookmark(entry.post);
-  }
-
+  // 表示中のポストはキューの先頭に戻し、取り消したポストはキューから外す
+  const displaced = currentPost && currentPost.id !== entry.post.id ? currentPost : null;
+  const rest = postQueue.filter((post) => post.id !== entry.post.id && post.id !== displaced?.id);
+  postQueue.splice(0, postQueue.length, ...(displaced ? [displaced] : []), ...rest);
   skippedIds.delete(entry.post.id);
-  await sendMessage({
-    action: 'update_bookmark',
-    id: entry.post.id,
-    changes: {
-      status: 'unprocessed',
-      folder: entry.post.folder
-    }
-  });
+
+  if (entry.type !== 'skipped') {
+    if (entry.type === 'discarded') cancelScheduledUnbookmark(entry.post);
+    await sendMessage({
+      action: 'update_bookmark',
+      id: entry.post.id,
+      changes: {
+        status: 'unprocessed',
+        folder: entry.post.folder
+      }
+    });
+  }
+
   showPost(entry.post);
   await updateCount();
 }
@@ -544,26 +508,16 @@ function setView(mode: ViewMode): void {
   tabKept?.classList.toggle('active', mode === 'kept');
 
   if (mode === 'kept') {
-    void loadKeptView().catch((error: unknown) => {
-      if (!isContextInvalidatedError(error)) {
-        console.error(error);
-      }
-    });
+    void loadKeptView().catch(logUnexpected);
   }
 }
 
 function saveLastFolder(name: string): void {
   if (!name || !isExtensionAlive()) return;
   try {
-    void chrome.storage.local.set({ [LAST_FOLDER_KEY]: name }).catch((error: unknown) => {
-      if (!isContextInvalidatedError(error)) {
-        console.error(error);
-      }
-    });
+    void chrome.storage.local.set({ [LAST_FOLDER_KEY]: name }).catch(logUnexpected);
   } catch (error) {
-    if (!isContextInvalidatedError(error)) {
-      console.error(error);
-    }
+    logUnexpected(error);
   }
 }
 
@@ -579,7 +533,7 @@ async function loadLastFolder(): Promise<string | null> {
 }
 
 function applySortFolder(name: string): boolean {
-  const sortSelect = document.getElementById('folder-select') as HTMLSelectElement | null;
+  const sortSelect = sortFolderSelect();
   if (!sortSelect) return false;
   if (![...sortSelect.options].some((option) => option.value === name)) return false;
   sortSelect.value = name;
@@ -686,9 +640,7 @@ async function loadKeptPage(reset: boolean): Promise<void> {
 }
 
 function reloadKeptList(): void {
-  void loadKeptPage(true).catch((error: unknown) => {
-    if (!isContextInvalidatedError(error)) console.error(error);
-  });
+  void loadKeptPage(true).catch(logUnexpected);
 }
 
 function updateKeptMore(): void {
@@ -824,7 +776,7 @@ async function loadFolders(): Promise<void> {
     openFolder = DEFAULT_FOLDER;
   }
 
-  const sortSelect = document.getElementById('folder-select') as HTMLSelectElement | null;
+  const sortSelect = sortFolderSelect();
   if (sortSelect) populateFolderSelect(sortSelect, sortSelect.value || DEFAULT_FOLDER);
 }
 
@@ -848,14 +800,14 @@ async function addFolderFromInput(input: HTMLInputElement | null, selectAfterAdd
   }
 
   if (input) input.value = '';
-  const addedName = name.trim().replace(/\s+/g, ' ').slice(0, 40);
+  const addedName = sanitizeFolderName(name);
   const exists = folders.some((folder) => folder.name === addedName);
   if (exists && selectAfterAdd) {
     openFolder = addedName;
     saveLastFolder(addedName);
   }
 
-  const sortSelect = document.getElementById('folder-select') as HTMLSelectElement | null;
+  const sortSelect = sortFolderSelect();
   if (sortSelect) {
     populateFolderSelect(sortSelect, exists && selectAfterAdd ? addedName : sortSelect.value);
   }
@@ -880,7 +832,7 @@ async function removeFolder(name: string): Promise<void> {
   folders = response.folders;
   if (openFolder === name) openFolder = DEFAULT_FOLDER;
 
-  const sortSelect = document.getElementById('folder-select') as HTMLSelectElement | null;
+  const sortSelect = sortFolderSelect();
   if (sortSelect) {
     const nextFolder = sortSelect.value === name ? DEFAULT_FOLDER : sortSelect.value;
     populateFolderSelect(sortSelect, nextFolder);
@@ -964,6 +916,7 @@ async function importFromFile(file: File): Promise<void> {
   window.alert(`${response.imported}件を読み込みました`);
 }
 
+/** 処理中でなければ task を実行する。拡張機能の再読み込みによるエラーは握りつぶす */
 async function runExclusive(task: () => Promise<void>): Promise<void> {
   if (isBusy) return;
   isBusy = true;
@@ -976,6 +929,40 @@ async function runExclusive(task: () => Promise<void>): Promise<void> {
   } finally {
     isBusy = false;
   }
+}
+
+function keepAndNext(): void {
+  clearDiscardArm();
+  void runExclusive(async () => {
+    await keepCurrentPost();
+    await loadNextPost();
+  });
+}
+
+function skipAndNext(): void {
+  clearDiscardArm();
+  void runExclusive(async () => {
+    await skipCurrentPost();
+    await loadNextPost();
+  });
+}
+
+/** 破棄は 2 回押しで確定する。1 回目は確認状態にするだけ */
+function discardOrArm(): void {
+  if (!isDiscardArmed()) {
+    armDiscard();
+    return;
+  }
+  clearDiscardArm();
+  void runExclusive(async () => {
+    await discardCurrentPost();
+    await loadNextPost();
+  });
+}
+
+function clearSearchInput(): void {
+  const searchInput = document.getElementById('kept-search') as HTMLInputElement | null;
+  if (searchInput) searchInput.value = '';
 }
 
 document.getElementById('folder-select')?.addEventListener('change', (e) => {
@@ -1015,9 +1002,7 @@ document.getElementById('import-file')?.addEventListener('change', (e) => {
 // 解除キューは background で進むので、失敗件数はときどき取り直す
 setInterval(() => {
   if (document.hidden) return;
-  void updateUnbookmarkFailures().catch((error: unknown) => {
-    if (!isContextInvalidatedError(error)) console.error(error);
-  });
+  void updateUnbookmarkFailures().catch(logUnexpected);
 }, 10_000);
 
 document.getElementById('card-open-link')?.addEventListener('click', (e) => {
@@ -1026,34 +1011,15 @@ document.getElementById('card-open-link')?.addEventListener('click', (e) => {
 });
 
 document.getElementById('btn-keep')?.addEventListener('click', () => {
-  if (!currentPost) return;
-  clearDiscardArm();
-  void runExclusive(async () => {
-    await keepCurrentPost();
-    await loadNextPost();
-  });
+  if (currentPost) keepAndNext();
 });
 
 document.getElementById('btn-skip')?.addEventListener('click', () => {
-  if (!currentPost) return;
-  clearDiscardArm();
-  void runExclusive(async () => {
-    await skipCurrentPost();
-    await loadNextPost();
-  });
+  if (currentPost) skipAndNext();
 });
 
 document.getElementById('btn-discard')?.addEventListener('click', () => {
-  if (!currentPost) return;
-  if (!isDiscardArmed()) {
-    armDiscard();
-    return;
-  }
-  clearDiscardArm();
-  void runExclusive(async () => {
-    await discardCurrentPost();
-    await loadNextPost();
-  });
+  if (currentPost) discardOrArm();
 });
 
 document.getElementById('folder-list')?.addEventListener('click', (e) => {
@@ -1062,11 +1028,7 @@ document.getElementById('folder-list')?.addEventListener('click', (e) => {
   if (deleteBtn instanceof HTMLElement && deleteBtn.dataset.folder) {
     e.preventDefault();
     e.stopPropagation();
-    void removeFolder(deleteBtn.dataset.folder).catch((error: unknown) => {
-      if (!isContextInvalidatedError(error)) {
-        console.error(error);
-      }
-    });
+    void removeFolder(deleteBtn.dataset.folder).catch(logUnexpected);
     return;
   }
 
@@ -1074,32 +1036,22 @@ document.getElementById('folder-list')?.addEventListener('click', (e) => {
   if (!(item instanceof HTMLElement) || !item.dataset.folder) return;
 
   openFolder = item.dataset.folder;
-  const searchInput = document.getElementById('kept-search') as HTMLInputElement | null;
-  if (searchInput) searchInput.value = '';
+  clearSearchInput();
   searchQuery = '';
   renderFolderList();
   reloadKeptList();
 });
 
-document.getElementById('add-folder-form')?.addEventListener('submit', (e) => {
-  e.preventDefault();
-  const input = document.getElementById('add-folder-input') as HTMLInputElement | null;
-  void addFolderFromInput(input, true).catch((error: unknown) => {
-    if (!isContextInvalidatedError(error)) {
-      console.error(error);
-    }
+for (const [formId, inputId] of [
+  ['add-folder-form', 'add-folder-input'],
+  ['sort-add-folder-form', 'sort-add-folder-input']
+] as const) {
+  document.getElementById(formId)?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = document.getElementById(inputId) as HTMLInputElement | null;
+    void addFolderFromInput(input, true).catch(logUnexpected);
   });
-});
-
-document.getElementById('sort-add-folder-form')?.addEventListener('submit', (e) => {
-  e.preventDefault();
-  const input = document.getElementById('sort-add-folder-input') as HTMLInputElement | null;
-  void addFolderFromInput(input, true).catch((error: unknown) => {
-    if (!isContextInvalidatedError(error)) {
-      console.error(error);
-    }
-  });
-});
+}
 
 document.getElementById('kept-search')?.addEventListener('input', (e) => {
   const target = e.target;
@@ -1156,11 +1108,7 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
     }
     if (e.key === 'Enter' && currentPost) {
       e.preventDefault();
-      clearDiscardArm();
-      void runExclusive(async () => {
-        await keepCurrentPost();
-        await loadNextPost();
-      });
+      keepAndNext();
     }
     return;
   }
@@ -1197,29 +1145,13 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
 
   if (e.key === 'ArrowRight') {
     e.preventDefault();
-    clearDiscardArm();
-    void runExclusive(async () => {
-      await keepCurrentPost();
-      await loadNextPost();
-    });
+    keepAndNext();
   } else if (e.key === 'ArrowLeft') {
     e.preventDefault();
-    if (!isDiscardArmed()) {
-      armDiscard();
-      return;
-    }
-    clearDiscardArm();
-    void runExclusive(async () => {
-      await discardCurrentPost();
-      await loadNextPost();
-    });
+    discardOrArm();
   } else if (e.key === 'ArrowDown') {
     e.preventDefault();
-    clearDiscardArm();
-    void runExclusive(async () => {
-      await skipCurrentPost();
-      await loadNextPost();
-    });
+    skipAndNext();
   }
 });
 
@@ -1227,14 +1159,10 @@ void loadFolders()
   .then(async () => {
     const last = await loadLastFolder();
     if (last && folders.some((folder) => folder.name === last)) {
-      const sortSelect = document.getElementById('folder-select') as HTMLSelectElement | null;
+      const sortSelect = sortFolderSelect();
       if (sortSelect) sortSelect.value = last;
     }
     await updateUnbookmarkFailures();
     return loadNextPost();
   })
-  .catch((error: unknown) => {
-    if (!isContextInvalidatedError(error)) {
-      console.error(error);
-    }
-  });
+  .catch(logUnexpected);

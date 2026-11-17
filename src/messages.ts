@@ -40,29 +40,30 @@ export type ExtensionRequest =
   | { action: 'clear_bookmarks' }
   | { action: 'open_dashboard' };
 
-const ACTIONS: ReadonlySet<ExtensionRequest['action']> = new Set([
-  'save_posts',
-  'unbookmark',
-  'cancel_unbookmark',
-  'unbookmark_done',
-  'list_unbookmark_failures',
-  'retry_unbookmark_failures',
-  'export_data',
-  'import_data',
-  'get_unprocessed',
-  'update_bookmark',
-  'get_counts',
-  'list_kept',
-  'list_folders',
-  'add_folder',
-  'delete_folder',
-  'clear_bookmarks',
-  'open_dashboard'
-]);
+// Record にして、ExtensionRequest に action を足したときに書き漏れを型エラーで気づけるようにする
+const ACTIONS: Record<ExtensionRequest['action'], true> = {
+  save_posts: true,
+  unbookmark: true,
+  cancel_unbookmark: true,
+  unbookmark_done: true,
+  list_unbookmark_failures: true,
+  retry_unbookmark_failures: true,
+  export_data: true,
+  import_data: true,
+  get_unprocessed: true,
+  update_bookmark: true,
+  get_counts: true,
+  list_kept: true,
+  list_folders: true,
+  add_folder: true,
+  delete_folder: true,
+  clear_bookmarks: true,
+  open_dashboard: true
+};
 
 export function isExtensionRequest(value: unknown): value is ExtensionRequest {
   if (typeof value !== 'object' || value === null) return false;
   if (!('action' in value)) return false;
   const action = value.action;
-  return typeof action === 'string' && ACTIONS.has(action as ExtensionRequest['action']);
+  return typeof action === 'string' && Object.hasOwn(ACTIONS, action);
 }
