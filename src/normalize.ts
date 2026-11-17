@@ -38,7 +38,7 @@ export function toBookmarkPost(post: BookmarkPost): BookmarkPost {
     author: typeof post.author === 'string' ? post.author : '不明',
     text: typeof post.text === 'string' ? post.text : '',
     images,
-    folder: typeof post.folder === 'string' && post.folder ? post.folder : DEFAULT_FOLDER,
+    folder: (typeof post.folder === 'string' && sanitizeFolderName(post.folder)) || DEFAULT_FOLDER,
     status,
     savedAt: typeof post.savedAt === 'string' ? post.savedAt : new Date().toISOString()
   };
@@ -52,7 +52,11 @@ export function toBookmarkPost(post: BookmarkPost): BookmarkPost {
 
 export function sanitizeChanges(changes: BookmarkChanges): BookmarkChanges {
   const next: BookmarkChanges = {};
-  if (typeof changes.folder === 'string') next.folder = changes.folder;
+  if (typeof changes.folder === 'string') {
+    // フォルダ一覧（addFolder）と同じ整形をかけ、空になる名前は受け付けない
+    const folder = sanitizeFolderName(changes.folder);
+    if (folder) next.folder = folder;
+  }
   if (changes.status && STATUSES.has(changes.status)) {
     next.status = changes.status;
   }
