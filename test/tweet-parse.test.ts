@@ -7,38 +7,15 @@ import {
   parseTweetElement,
   parseVisibleTweets
 } from '../src/tweet-dom';
+import { installInnerText } from './helpers/inner-text';
 
 // X の DOM を模した HTML で、ポストの読み取りを確かめる。
 // data-testid の名前は content script が前提にしているものに合わせている。
 
 const SAVED_AT = '2026-01-01T00:00:00.000Z';
-const BLOCK_TAGS = new Set(['DIV', 'P', 'LI', 'ARTICLE', 'SECTION']);
-
-/**
- * jsdom は innerText を実装していない。ブラウザではブロック要素ごとに改行されるので、
- * その部分だけ真似た簡易版を入れる（CSS による表示・非表示は考慮しない）。
- */
-function approximateInnerText(node: Node): string {
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
-  if (node instanceof HTMLBRElement) return '\n';
-  const inner = Array.from(node.childNodes).map(approximateInnerText).join('');
-  return node instanceof HTMLElement && BLOCK_TAGS.has(node.tagName) ? `\n${inner}\n` : inner;
-}
 
 beforeAll(() => {
-  if (!('innerText' in HTMLElement.prototype)) {
-    Object.defineProperty(HTMLElement.prototype, 'innerText', {
-      configurable: true,
-      get(this: HTMLElement) {
-        // ブラウザ同様、行内の連続する空白はまとめ、空行は詰める
-        return approximateInnerText(this)
-          .split('\n')
-          .map((line) => line.replace(/\s+/g, ' ').trim())
-          .filter(Boolean)
-          .join('\n');
-      }
-    });
-  }
+  installInnerText();
 });
 
 beforeEach(() => {
