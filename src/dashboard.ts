@@ -9,7 +9,7 @@ import {
   retryUnbookmarkFailures,
   updateUnbookmarkFailures
 } from './dashboard/data';
-import { loadFolders, sortFolderSelect } from './dashboard/folders';
+import { loadFolders, renderFolderRack, sortFolderSelect } from './dashboard/folders';
 import { showToast } from './dashboard/notify';
 import { addFolderFromInput, bindKeptView, loadKeptView, resetKeptState } from './dashboard/kept-view';
 import { bindSortView, clearDiscardArm, loadNextPost, resetSortState } from './dashboard/sort-view';
@@ -32,6 +32,9 @@ function setView(mode: ViewMode): void {
 
   if (mode === 'kept') {
     void loadKeptView().catch(logUnexpected);
+  } else {
+    // 保存済み画面でフォルダを増減・移動していることがあるので、棚の件数を合わせる
+    renderFolderRack();
   }
 }
 
@@ -59,6 +62,23 @@ for (const [formId, inputId] of [
     e.preventDefault();
     const input = document.getElementById(inputId) as HTMLInputElement | null;
     void addFolderFromInput(input, true).catch(logUnexpected);
+  });
+}
+
+// データのメニューは、項目を選んだら・外をクリックしたら・Esc で閉じる
+const dataMenu = document.getElementById('data-menu');
+if (dataMenu instanceof HTMLDetailsElement) {
+  dataMenu.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement | null)?.closest('.menu-item')) dataMenu.open = false;
+  });
+  document.addEventListener('click', (e) => {
+    if (dataMenu.open && !dataMenu.contains(e.target as Node)) dataMenu.open = false;
+  });
+  dataMenu.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && dataMenu.open) {
+      dataMenu.open = false;
+      dataMenu.querySelector('summary')?.focus();
+    }
   });
 }
 
@@ -106,6 +126,7 @@ void loadFolders()
     if (last && state.folders.some((folder) => folder.name === last)) {
       const sortSelect = sortFolderSelect();
       if (sortSelect) sortSelect.value = last;
+      renderFolderRack();
     }
     await updateUnbookmarkFailures();
     return loadNextPost();

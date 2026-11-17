@@ -3,6 +3,7 @@ import { DEFAULT_FOLDER } from '../constants';
 import type { BookmarkPost } from '../db';
 import { sanitizeFolderName } from '../normalize';
 import { logUnexpected } from '../runtime';
+import { isHttpUrl } from '../urls';
 import { openTweet, saveLastFolder, sendMessage } from './api';
 import { createIcon, fillAuthor, fillTextWithLinks, renderLinkPreview } from './dom';
 import { adjustFolderCount, loadFolders, populateFolderSelect, sortFolderSelect } from './folders';
@@ -124,6 +125,8 @@ function renderKeptHeading(): void {
 
   const query = searchQuery.trim();
   heading.innerText = query ? `「${query}」の検索結果` : openFolder;
+  const total = document.getElementById('kept-total');
+  if (total) total.innerText = keptTotal > 0 ? `${keptTotal}件` : '';
 }
 
 function createKeptFolderSelect(selectedFolder: string): HTMLSelectElement {
@@ -151,7 +154,7 @@ function renderKeptList(): void {
   if (emptySub instanceof HTMLElement) {
     emptySub.innerText = query
       ? '別のキーワードを試してください'
-      : '選別タブで → を押すと、選択中のフォルダに保存されます';
+      : '選別で → を押すと、選んでいるフォルダに保存されます';
   }
 
   listEl.replaceChildren();
@@ -171,12 +174,14 @@ function renderKeptList(): void {
     author.className = 'author';
     fillAuthor(author, post.author);
 
-    const openHint = document.createElement('span');
-    openHint.className = 'kept-open';
-    openHint.title = 'Twitterで開く';
-    openHint.appendChild(createIcon('open'));
+    head.append(author);
 
-    head.append(author, openHint);
+    const openLink = document.createElement('a');
+    openLink.className = 'kept-open';
+    openLink.href = isHttpUrl(post.url) ? post.url : '#';
+    openLink.target = '_blank';
+    openLink.rel = 'noopener noreferrer';
+    openLink.append('元ポスト', createIcon('open'));
 
     const text = document.createElement('div');
     text.className = 'kept-text';
@@ -191,22 +196,24 @@ function renderKeptList(): void {
     folderSelect.setAttribute('aria-label', 'フォルダを移動');
     const edit = document.createElement('div');
     edit.className = 'kept-edit';
-    edit.append(folderSelect);
+    edit.append(openLink, folderSelect);
 
-    row.append(head, text);
+    const body = document.createElement('div');
+    body.className = 'kept-body';
+    body.append(head, text);
     if (post.linkCard) {
       const previewWrap = document.createElement('div');
       previewWrap.className = 'link-preview-wrap';
       renderLinkPreview(previewWrap, post.linkCard);
-      row.appendChild(previewWrap);
+      body.appendChild(previewWrap);
     }
     if (showBadge) {
       const badge = document.createElement('span');
       badge.className = 'kept-folder-badge';
       badge.innerText = post.folder;
-      row.appendChild(badge);
+      body.appendChild(badge);
     }
-    row.appendChild(edit);
+    row.append(body, edit);
     fragment.appendChild(row);
   }
 
