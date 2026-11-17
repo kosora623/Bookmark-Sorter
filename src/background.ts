@@ -1,7 +1,9 @@
-import { DEFAULT_FOLDER, db, type BookmarkPost } from './db';
+import { DEFAULT_FOLDER } from './constants';
+import { db, type BookmarkPost } from './db';
 import {
   isExtensionRequest,
   type ExportData,
+  type ExtensionRequest,
   type FolderInfo,
   type UnbookmarkFailure
 } from './messages';
@@ -238,36 +240,36 @@ async function listFolders(): Promise<{ folders: FolderInfo[] }> {
   };
 }
 
-async function addFolder(rawName: string): Promise<{ ok: boolean; error?: string; folders: FolderInfo[] }> {
-  const name = sanitizeFolderName(rawName);
-  if (!name) {
-    const listed = await listFolders();
-    return { ok: false, error: 'フォルダ名を入力してください', folders: listed.folders };
-  }
-
-  await ensureFolders();
-  const existing = await db.folders.get(name);
-  if (existing) {
-    const listed = await listFolders();
-    return { ok: false, error: '同じ名前のフォルダがあります', folders: listed.folders };
-  }
-
-  await db.folders.add({ name });
-  const listed = await listFolders();
-  return { ok: true, folders: listed.folders };
+interface FolderMutationResult {
+  ok: boolean;
+  error?: string;
+  folders: FolderInfo[];
 }
 
-async function deleteFolder(rawName: string): Promise<{ ok: boolean; error?: string; folders: FolderInfo[] }> {
+/** 成否にかかわらず最新のフォルダ一覧を添えて返す */
+async function folderMutationResult(error?: string): Promise<FolderMutationResult> {
+  const { folders } = await listFolders();
+  return error ? { ok: false, error, folders } : { ok: true, folders };
+}
+
+async function addFolder(rawName: string): Promise<FolderMutationResult> {
   const name = sanitizeFolderName(rawName);
-  if (!name || name === DEFAULT_FOLDER) {
-    const listed = await listFolders();
-    return { ok: false, error: 'このフォルダは削除できません', folders: listed.folders };
-  }
+  if (!name) return folderMutationResult('フォルダ名を入力してください');
+
+  await ensureFolders();
+  if (await db.folders.get(name)) return folderMutationResult('同じ名前のフォルダがあります');
+
+  await db.folders.add({ name });
+  return folderMutationResult();
+}
+
+async function deleteFolder(rawName: string): Promise<FolderMutationResult> {
+  const name = sanitizeFolderName(rawName);
+  if (!name || name === DEFAULT_FOLDER) return folderMutationResult('このフォルダは削除できません');
 
   await db.bookmarks.where('folder').equals(name).modify({ folder: DEFAULT_FOLDER });
   await db.folders.delete(name);
-  const listed = await listFolders();
-  return { ok: true, folders: listed.folders };
+  return folderMutationResult();
 }
 
 async function exportData(): Promise<ExportData> {
@@ -496,132 +498,91 @@ chrome.action.onClicked.addListener(() => {
   void openDashboard();
 });
 
+type Sender = chrome.runtime.MessageSender;
+type Action = ExtensionRequest['action'];
+type RequestOf<A extends Action> = Extract<ExtensionRequest, { action: A }>;
+
+interface Route<A extends Action> {
+  /** 送信元の確認。通らなければ応答しない */
+  allow: (sender: Sender) => boolean;
+  handle: (message: RequestOf<A>) => unknown;
+}
+
+const fromXOrExtensionPage = (sender: Sender): boolean => isXContentScript(sender) || isExtensionPage(sender);
+
+const stringOr = (value: unknown, fallback: string): string => (typeof value === 'string' ? value : fallback);
+const numberOr = (value: unknown, fallback: number): number => (typeof value === 'number' ? value : fallback);
+
+// action ごとの処理。型で全 action を網羅させる
+const routes: { [A in Action]: Route<A> } = {
+  save_posts: { allow: isXContentScript, handle: (m) => savePosts(m.posts) },
+  // 実際の完了通知は runOneUnbookmark の listener が受け取る。ここでは応答だけ返す
+  unbookmark_done: { allow: isXContentScript, handle: () => ({ ok: true }) },
+  open_dashboard: {
+    allow: fromXOrExtensionPage,
+    handle: async () => {
+      await openDashboard();
+      return { ok: true };
+    }
+  },
+  unbookmark: {
+    allow: isExtensionPage,
+    handle: async (m) => {
+      if (m.tweetUrl) await enqueueUnbookmark(m.tweetUrl);
+      return { status: 'ok' };
+    }
+  },
+  cancel_unbookmark: {
+    allow: isExtensionPage,
+    handle: async (m) => {
+      if (m.tweetUrl) await cancelQueuedUnbookmark(m.tweetUrl);
+      return { ok: true };
+    }
+  },
+  list_unbookmark_failures: { allow: isExtensionPage, handle: listUnbookmarkFailures },
+  retry_unbookmark_failures: { allow: isExtensionPage, handle: retryUnbookmarkFailures },
+  export_data: { allow: isExtensionPage, handle: exportData },
+  import_data: { allow: isExtensionPage, handle: (m) => importData(m.data) },
+  get_unprocessed: {
+    allow: isExtensionPage,
+    handle: (m) => {
+      const excludeIds = Array.isArray(m.excludeIds)
+        ? m.excludeIds.filter((id): id is string => typeof id === 'string')
+        : [];
+      return getUnprocessed(excludeIds, numberOr(m.limit, 1));
+    }
+  },
+  update_bookmark: {
+    allow: isExtensionPage,
+    handle: async (m) => {
+      if (typeof m.id !== 'string' || !m.changes) return { ok: false };
+      await db.bookmarks.update(m.id, sanitizeChanges(m.changes));
+      return { ok: true };
+    }
+  },
+  get_counts: { allow: isExtensionPage, handle: getCounts },
+  list_kept: {
+    allow: isExtensionPage,
+    handle: (m) =>
+      listKept(db, {
+        folder: stringOr(m.folder, '') || DEFAULT_FOLDER,
+        query: stringOr(m.query, ''),
+        offset: numberOr(m.offset, 0),
+        limit: numberOr(m.limit, MAX_KEPT_PAGE_LIMIT)
+      })
+  },
+  list_folders: { allow: isExtensionPage, handle: listFolders },
+  add_folder: { allow: isExtensionPage, handle: (m) => addFolder(stringOr(m.name, '')) },
+  delete_folder: { allow: isExtensionPage, handle: (m) => deleteFolder(stringOr(m.name, '')) },
+  clear_bookmarks: { allow: isExtensionPage, handle: clearBookmarks }
+};
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isExtensionRequest(message)) return;
 
-  if (message.action === 'save_posts') {
-    if (!isXContentScript(sender)) return;
-    void savePosts(message.posts).then(sendResponse);
-    return true;
-  }
+  const route = routes[message.action] as Route<Action>;
+  if (!route.allow(sender)) return;
 
-  if (message.action === 'unbookmark') {
-    if (!isExtensionPage(sender)) return;
-    if (message.tweetUrl) {
-      void enqueueUnbookmark(message.tweetUrl).then(() => sendResponse({ status: 'ok' }));
-      return true;
-    }
-    sendResponse({ status: 'ok' });
-    return;
-  }
-
-  if (message.action === 'cancel_unbookmark') {
-    if (!isExtensionPage(sender)) return;
-    if (!message.tweetUrl) {
-      sendResponse({ ok: true });
-      return;
-    }
-    void cancelQueuedUnbookmark(message.tweetUrl).then(() => sendResponse({ ok: true }));
-    return true;
-  }
-
-  if (message.action === 'list_unbookmark_failures') {
-    if (!isExtensionPage(sender)) return;
-    void listUnbookmarkFailures().then(sendResponse);
-    return true;
-  }
-
-  if (message.action === 'retry_unbookmark_failures') {
-    if (!isExtensionPage(sender)) return;
-    void retryUnbookmarkFailures().then(sendResponse);
-    return true;
-  }
-
-  if (message.action === 'export_data') {
-    if (!isExtensionPage(sender)) return;
-    void exportData().then(sendResponse);
-    return true;
-  }
-
-  if (message.action === 'import_data') {
-    if (!isExtensionPage(sender)) return;
-    void importData(message.data).then(sendResponse);
-    return true;
-  }
-
-  if (message.action === 'unbookmark_done') {
-    if (!isXContentScript(sender)) return;
-    sendResponse({ ok: true });
-    return;
-  }
-
-  if (message.action === 'get_unprocessed') {
-    if (!isExtensionPage(sender)) return;
-    const excludeIds = Array.isArray(message.excludeIds)
-      ? message.excludeIds.filter((id): id is string => typeof id === 'string')
-      : [];
-    const limit = typeof message.limit === 'number' ? message.limit : 1;
-    void getUnprocessed(excludeIds, limit).then(sendResponse);
-    return true;
-  }
-
-  if (message.action === 'update_bookmark') {
-    if (!isExtensionPage(sender)) return;
-    if (typeof message.id !== 'string' || !message.changes) {
-      sendResponse({ ok: false });
-      return;
-    }
-    const changes = sanitizeChanges(message.changes);
-    void db.bookmarks.update(message.id, changes).then(() => sendResponse({ ok: true }));
-    return true;
-  }
-
-  if (message.action === 'get_counts') {
-    if (!isExtensionPage(sender)) return;
-    void getCounts().then(sendResponse);
-    return true;
-  }
-
-  if (message.action === 'list_kept') {
-    if (!isExtensionPage(sender)) return;
-    void listKept(db, {
-      folder: typeof message.folder === 'string' && message.folder ? message.folder : DEFAULT_FOLDER,
-      query: typeof message.query === 'string' ? message.query : '',
-      offset: typeof message.offset === 'number' ? message.offset : 0,
-      limit: typeof message.limit === 'number' ? message.limit : MAX_KEPT_PAGE_LIMIT
-    }).then(sendResponse);
-    return true;
-  }
-
-  if (message.action === 'list_folders') {
-    if (!isExtensionPage(sender)) return;
-    void listFolders().then(sendResponse);
-    return true;
-  }
-
-  if (message.action === 'add_folder') {
-    if (!isExtensionPage(sender)) return;
-    void addFolder(typeof message.name === 'string' ? message.name : '').then(sendResponse);
-    return true;
-  }
-
-  if (message.action === 'delete_folder') {
-    if (!isExtensionPage(sender)) return;
-    void deleteFolder(typeof message.name === 'string' ? message.name : '').then(sendResponse);
-    return true;
-  }
-
-  if (message.action === 'clear_bookmarks') {
-    if (!isExtensionPage(sender)) return;
-    void clearBookmarks().then(sendResponse);
-    return true;
-  }
-
-  if (message.action === 'open_dashboard') {
-    if (!isXContentScript(sender) && !isExtensionPage(sender)) return;
-    void openDashboard().then(() => sendResponse({ ok: true }));
-    return true;
-  }
-
-  return;
+  void Promise.resolve(route.handle(message)).then(sendResponse);
+  return true;
 });

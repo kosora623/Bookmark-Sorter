@@ -1,6 +1,8 @@
 import { DEFAULT_FOLDER } from './constants';
 import type { BookmarkPost } from './db';
+import { isContextInvalidatedError, isExtensionAlive, logUnexpected } from './runtime';
 import { extractTweetText, isBookmarksPath } from './tweet-dom';
+import { PENDING_UNBOOKMARK_KEY, isHttpUrl, type PendingUnbookmark } from './urls';
 
 const INSTANCE_ID = Math.random().toString(36).slice(2);
 const BATCH_LIMIT = 100;
@@ -9,6 +11,10 @@ const SKIP_SCROLL_INTERVAL_MS = 280;
 const BOTTOM_DETECT_COUNT = 5;
 const SKIP_BOTTOM_DETECT_COUNT = 18;
 const PAGE_CHECK_FALLBACK_MS = 5000;
+const UNBOOKMARK_FIND_TIMEOUT_MS = 10_000;
+const UNBOOKMARK_CONFIRM_TIMEOUT_MS = 6_000;
+const UNBOOKMARK_POLL_MS = 200;
+const OVERLAY_ID = 'x-bm-sorter-overlay';
 
 let isCollecting = false;
 let isSkipMode = false;
@@ -22,16 +28,12 @@ let pageCheckTimer: ReturnType<typeof setInterval> | null = null;
 let titleObserver: MutationObserver | null = null;
 let collectTimer: ReturnType<typeof setTimeout> | null = null;
 
-function isContextInvalidatedError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes('Extension context invalidated');
-}
-
-function isExtensionAlive(): boolean {
-  try {
-    return typeof chrome.runtime.id === 'string';
-  } catch {
-    return false;
+/** このインスタンスが作ったオーバーレイだけ消す（再注入された別インスタンスのものは残す） */
+function removeOwnOverlay(): void {
+  const overlay = document.getElementById(OVERLAY_ID);
+  if (overlay?.dataset.instance === INSTANCE_ID) {
+    overlay.remove();
+    overlayCreated = false;
   }
 }
 
@@ -53,11 +55,7 @@ function teardown(): void {
     collectTimer = null;
   }
 
-  const overlay = document.getElementById('x-bm-sorter-overlay');
-  if (overlay?.dataset.instance === INSTANCE_ID) {
-    overlay.remove();
-    overlayCreated = false;
-  }
+  removeOwnOverlay();
 }
 
 async function sendRuntimeMessage(message: object): Promise<unknown> {
@@ -80,12 +78,6 @@ async function sendRuntimeMessage(message: object): Promise<unknown> {
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-
-// urls.ts と同じ値。content script は web_accessible_resources に載せたチャンクしか
-// import できないため、urls.ts（Dexie と同じチャンクに入る）は読み込まずに複製している。
-const PENDING_UNBOOKMARK_KEY = 'pendingUnbookmark';
-const UNBOOKMARK_FIND_TIMEOUT_MS = 10_000;
-const UNBOOKMARK_CONFIRM_TIMEOUT_MS = 6_000;
 
 function isNestedTweet(el: HTMLElement): boolean {
   if (el.closest('[data-testid="quoteTweet"]')) return true;
@@ -133,12 +125,8 @@ async function isPendingUnbookmark(): Promise<boolean> {
 
   try {
     const stored = await chrome.storage.session.get(PENDING_UNBOOKMARK_KEY);
-    const pending = stored[PENDING_UNBOOKMARK_KEY];
-    return (
-      typeof pending === 'object' &&
-      pending !== null &&
-      (pending as { statusId?: string }).statusId === statusId
-    );
+    const pending = stored[PENDING_UNBOOKMARK_KEY] as Partial<PendingUnbookmark> | undefined;
+    return pending?.statusId === statusId;
   } catch {
     return false;
   }
@@ -152,7 +140,7 @@ async function waitForBookmarkCleared(deadline: number): Promise<boolean> {
     if (tweetEl && !findRemoveBookmarkButton(tweetEl) && queryOwn(tweetEl, '[data-testid="bookmark"]')) {
       return true;
     }
-    await sleep(200);
+    await sleep(UNBOOKMARK_POLL_MS);
   }
   return false;
 }
@@ -183,20 +171,19 @@ async function tryAutoUnbookmark(): Promise<void> {
         break;
       }
     }
-    await sleep(200);
+    await sleep(UNBOOKMARK_POLL_MS);
   }
 
   await sendRuntimeMessage({ action: 'unbookmark_done', ok });
 }
 
 function createOverlayUI(): void {
-  if (overlayCreated && document.getElementById('x-bm-sorter-overlay')) return;
+  if (overlayCreated && document.getElementById(OVERLAY_ID)) return;
 
-  const existing = document.getElementById('x-bm-sorter-overlay');
-  if (existing) existing.remove();
+  document.getElementById(OVERLAY_ID)?.remove();
 
   const container = document.createElement('div');
-  container.id = 'x-bm-sorter-overlay';
+  container.id = OVERLAY_ID;
   container.dataset.instance = INSTANCE_ID;
   container.style.cssText = `
     position: fixed;
@@ -223,7 +210,7 @@ function createOverlayUI(): void {
     <button id="x-bm-toggle-btn" style="
       background: #1d9bf0; color: #fff; border: none; padding: 6px 12px;
       border-radius: 4px; cursor: pointer; font-weight: bold;
-    ">100件を取得開始</button>
+    ">${BATCH_LIMIT}件を取得開始</button>
     <button id="x-bm-open-dash-btn" style="
       background: transparent; color: #1d9bf0; border: 1px solid #1d9bf0;
       padding: 6px 12px; border-radius: 4px; cursor: pointer;
@@ -248,11 +235,7 @@ function createOverlayUI(): void {
       updateStatus('未保存ポストを探してスクロール中...', '#1d9bf0');
       toggleBtn.innerText = '一時停止';
       toggleBtn.style.background = '#f4212e';
-      void startAutoCollect().catch((error: unknown) => {
-        if (!isContextInvalidatedError(error)) {
-          console.error(error);
-        }
-      });
+      void startAutoCollect().catch(logUnexpected);
     } else {
       stopCollect('一時停止しました');
     }
@@ -272,19 +255,10 @@ function stopCollect(reason: string): void {
   isSkipMode = false;
   const toggleBtn = document.getElementById('x-bm-toggle-btn') as HTMLButtonElement | null;
   if (toggleBtn) {
-    toggleBtn.innerText = '追加で100件取得';
+    toggleBtn.innerText = `追加で${BATCH_LIMIT}件取得`;
     toggleBtn.style.background = '#1d9bf0';
   }
   updateStatus(reason, '#00ba7c');
-}
-
-function isHttpUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-  } catch {
-    return false;
-  }
 }
 
 function hostnameOf(url: string): string | undefined {
@@ -370,19 +344,8 @@ function extractCardTexts(wrapper: HTMLElement): { domain?: string; title?: stri
   return { domain, title };
 }
 
-function findOwnCardWrapper(tweetEl: HTMLElement): HTMLElement | null {
-  const wrappers = tweetEl.querySelectorAll<HTMLElement>('[data-testid="card.wrapper"]');
-  for (const wrapper of wrappers) {
-    if (wrapper.closest('[data-testid="quoteTweet"]')) continue;
-    const nestedTweet = wrapper.closest('[data-testid="tweet"]');
-    if (nestedTweet && nestedTweet !== tweetEl) continue;
-    return wrapper;
-  }
-  return null;
-}
-
 function parseLinkCard(tweetEl: HTMLElement): BookmarkPost['linkCard'] | undefined {
-  const wrapper = findOwnCardWrapper(tweetEl);
+  const wrapper = queryOwn<HTMLElement>(tweetEl, '[data-testid="card.wrapper"]');
   if (!wrapper) return undefined;
 
   const anchor = wrapper.querySelector('a[href]');
@@ -405,8 +368,7 @@ function parseTweetElement(tweetEl: HTMLElement): BookmarkPost | null {
     const timeEl = queryOwn(tweetEl, 'time');
     const linkEl = timeEl ? timeEl.closest('a') : null;
     const url = linkEl instanceof HTMLAnchorElement ? linkEl.href : '';
-    const idMatch = url.match(/\/status\/(\d+)/);
-    const id = idMatch ? idMatch[1] : '';
+    const id = url.match(/\/status\/(\d+)/)?.[1];
 
     if (!id) return null;
 
@@ -559,22 +521,14 @@ function checkPage(): void {
     return;
   }
 
-  if (!unbookmarkAttempted && /\/status\/\d+/.test(location.pathname)) {
-    void tryAutoUnbookmark().catch((error: unknown) => {
-      if (!isContextInvalidatedError(error)) {
-        console.error(error);
-      }
-    });
+  if (!unbookmarkAttempted && statusIdFromLocation()) {
+    void tryAutoUnbookmark().catch(logUnexpected);
   }
 
-  if (isBookmarksPath(window.location.pathname)) {
+  if (isBookmarksPath(location.pathname)) {
     createOverlayUI();
   } else {
-    const overlay = document.getElementById('x-bm-sorter-overlay');
-    if (overlay?.dataset.instance === INSTANCE_ID) {
-      overlay.remove();
-      overlayCreated = false;
-    }
+    removeOwnOverlay();
   }
 }
 

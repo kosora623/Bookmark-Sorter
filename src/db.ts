@@ -1,8 +1,5 @@
 import { Dexie, type Table } from 'dexie';
-import { DEFAULT_FOLDER } from './constants';
 import { normalizeImageUrls } from './urls';
-
-export { DEFAULT_FOLDER };
 
 export interface BookmarkPost {
   id: string;
