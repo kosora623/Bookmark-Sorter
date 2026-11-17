@@ -40,8 +40,46 @@ export type ExtensionRequest =
   | { action: 'clear_bookmarks' }
   | { action: 'open_dashboard' };
 
+export type ExtensionAction = ExtensionRequest['action'];
+export type RequestOf<A extends ExtensionAction> = Extract<ExtensionRequest, { action: A }>;
+
+export interface FolderMutationResult {
+  ok: boolean;
+  error?: string;
+  folders: FolderInfo[];
+}
+
+/** action ごとの応答。background の戻り値と送信側の受け取りの両方をこの型で縛る */
+export interface ExtensionResponses {
+  save_posts: { savedCount: number };
+  unbookmark: { ok: true };
+  cancel_unbookmark: { ok: true };
+  unbookmark_done: { ok: true };
+  list_unbookmark_failures: { failures: UnbookmarkFailure[] };
+  retry_unbookmark_failures: { queued: number };
+  export_data: ExportData;
+  import_data: { ok: boolean; error?: string; imported: number };
+  get_unprocessed: { posts: BookmarkPost[] };
+  update_bookmark: { ok: boolean };
+  get_counts: { unprocessed: number; kept: number };
+  list_kept: { posts: BookmarkPost[]; total: number };
+  list_folders: { folders: FolderInfo[] };
+  add_folder: FolderMutationResult;
+  delete_folder: FolderMutationResult;
+  clear_bookmarks: { ok: true };
+  open_dashboard: { ok: true };
+}
+
+export type ResponseOf<A extends ExtensionAction> = ExtensionResponses[A];
+
+/**
+ * background からの返信。処理中に例外が起きても必ず error で返すので、送信側が待ち続けることはない。
+ * 中身は runtime.ts の unwrapReply で取り出す。
+ */
+export type ExtensionReply<T> = { data: T } | { error: string };
+
 // Record にして、ExtensionRequest に action を足したときに書き漏れを型エラーで気づけるようにする
-const ACTIONS: Record<ExtensionRequest['action'], true> = {
+const ACTIONS: Record<ExtensionAction, true> = {
   save_posts: true,
   unbookmark: true,
   cancel_unbookmark: true,

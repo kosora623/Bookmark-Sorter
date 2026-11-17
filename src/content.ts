@@ -1,6 +1,7 @@
 import { DEFAULT_FOLDER } from './constants';
 import type { BookmarkPost } from './db';
-import { isContextInvalidatedError, isExtensionAlive, logUnexpected } from './runtime';
+import type { ExtensionRequest, ResponseOf } from './messages';
+import { isContextInvalidatedError, isExtensionAlive, logUnexpected, unwrapReply } from './runtime';
 import { extractTweetText, isBookmarksPath } from './tweet-dom';
 import { PENDING_UNBOOKMARK_KEY, isHttpUrl, type PendingUnbookmark } from './urls';
 
@@ -58,14 +59,15 @@ function teardown(): void {
   removeOwnOverlay();
 }
 
-async function sendRuntimeMessage(message: object): Promise<unknown> {
+/** 拡張機能が再読み込みされていたら後片付けして undefined を返す。background 側の失敗は例外になる */
+async function sendRuntimeMessage<M extends ExtensionRequest>(message: M): Promise<ResponseOf<M['action']> | undefined> {
   if (!isExtensionAlive()) {
     teardown();
     return undefined;
   }
 
   try {
-    return await chrome.runtime.sendMessage(message);
+    return unwrapReply<ResponseOf<M['action']>>(await chrome.runtime.sendMessage(message));
   } catch (error) {
     if (isContextInvalidatedError(error)) {
       teardown();
@@ -431,14 +433,10 @@ async function collectVisibleTweets(): Promise<{ newAdded: number; visibleCount:
   const visibleCount = postsToSave.length;
   if (visibleCount === 0) return { newAdded: 0, visibleCount: 0 };
 
-  const response = (await sendRuntimeMessage({
-    action: 'save_posts',
-    posts: postsToSave
-  })) as { savedCount?: number } | undefined;
-
+  const response = await sendRuntimeMessage({ action: 'save_posts', posts: postsToSave });
   if (!response) return { newAdded: 0, visibleCount };
 
-  const newAdded = response.savedCount || 0;
+  const newAdded = response.savedCount;
   collectedCount += newAdded;
 
   const countEl = document.getElementById('x-bm-count');
@@ -512,6 +510,8 @@ async function startAutoCollect(): Promise<void> {
       return;
     }
     console.error(error);
+    // 次のスクロールは予約されないので、ボタンの表示も止まった状態に戻す
+    stopCollect('エラーで停止しました');
   }
 }
 

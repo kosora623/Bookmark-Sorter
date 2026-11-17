@@ -1,8 +1,8 @@
 import { DEFAULT_FOLDER } from './constants';
 import type { BookmarkPost } from './db';
-import type { BookmarkChanges, ExportData, ExtensionRequest, FolderInfo, UnbookmarkFailure } from './messages';
+import type { BookmarkChanges, ExtensionRequest, FolderInfo, ResponseOf } from './messages';
 import { sanitizeFolderName } from './normalize';
-import { isContextInvalidatedError, isExtensionAlive, logUnexpected } from './runtime';
+import { isContextInvalidatedError, isExtensionAlive, logUnexpected, unwrapReply } from './runtime';
 import { isHttpUrl } from './urls';
 
 type ViewMode = 'sort' | 'kept';
@@ -35,16 +35,10 @@ let discardArmedId: string | null = null;
 let discardArmTimer: ReturnType<typeof setTimeout> | null = null;
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
-function sendMessage<T>(message: ExtensionRequest): Promise<T> {
-  if (!isExtensionAlive()) {
-    return Promise.reject(new Error('Extension context invalidated'));
-  }
-
-  try {
-    return Promise.resolve(chrome.runtime.sendMessage(message) as Promise<T>);
-  } catch (error) {
-    return Promise.reject(error);
-  }
+/** 応答の型は action から決まる（messages.ts の ExtensionResponses）。background 側の失敗は例外になる */
+async function sendMessage<M extends ExtensionRequest>(message: M): Promise<ResponseOf<M['action']>> {
+  if (!isExtensionAlive()) throw new Error('Extension context invalidated');
+  return unwrapReply<ResponseOf<M['action']>>(await chrome.runtime.sendMessage(message));
 }
 
 function sendQuietly(message: ExtensionRequest): void {
@@ -310,7 +304,7 @@ async function refillQueue(excludeCurrent = true): Promise<void> {
     try {
       while (postQueue.length < PREFETCH_SIZE) {
         const needed = PREFETCH_SIZE - postQueue.length;
-        const response = await sendMessage<{ posts: BookmarkPost[] }>({
+        const response = await sendMessage({
           action: 'get_unprocessed',
           excludeIds: queueExcludeIds(excludeCurrent),
           limit: needed
@@ -411,7 +405,7 @@ function renderCard(post: BookmarkPost): void {
 }
 
 async function updateCount(): Promise<void> {
-  const counts = await sendMessage<{ unprocessed: number; kept: number }>({ action: 'get_counts' });
+  const counts = await sendMessage({ action: 'get_counts' });
   const remainingEl = document.getElementById('remaining-count');
   const keptEl = document.getElementById('kept-count');
   if (remainingEl) remainingEl.innerText = String(counts.unprocessed);
@@ -625,7 +619,7 @@ function renderFolderList(): void {
  */
 async function loadKeptPage(reset: boolean): Promise<void> {
   const requestId = ++keptRequestId;
-  const response = await sendMessage<{ posts: BookmarkPost[]; total: number }>({
+  const response = await sendMessage({
     action: 'list_kept',
     folder: openFolder,
     query: searchQuery,
@@ -770,7 +764,7 @@ async function persistKeptFolder(id: string, folder: string): Promise<void> {
 }
 
 async function loadFolders(): Promise<void> {
-  const response = await sendMessage<{ folders: FolderInfo[] }>({ action: 'list_folders' });
+  const response = await sendMessage({ action: 'list_folders' });
   folders = response.folders;
   if (!folders.some((folder) => folder.name === openFolder)) {
     openFolder = DEFAULT_FOLDER;
@@ -788,7 +782,7 @@ async function loadKeptView(): Promise<void> {
 
 async function addFolderFromInput(input: HTMLInputElement | null, selectAfterAdd: boolean): Promise<void> {
   const name = input?.value ?? '';
-  const response = await sendMessage<{ ok: boolean; error?: string; folders: FolderInfo[] }>({
+  const response = await sendMessage({
     action: 'add_folder',
     name
   });
@@ -819,7 +813,7 @@ async function removeFolder(name: string): Promise<void> {
   const confirmed = confirm(`フォルダ「${name}」を削除します。中のポストは「${DEFAULT_FOLDER}」へ移します。よろしいですか？`);
   if (!confirmed) return;
 
-  const response = await sendMessage<{ ok: boolean; error?: string; folders: FolderInfo[] }>({
+  const response = await sendMessage({
     action: 'delete_folder',
     name
   });
@@ -857,13 +851,13 @@ async function clearAllData(): Promise<void> {
 async function updateUnbookmarkFailures(): Promise<void> {
   const btn = document.getElementById('unbookmark-failed-btn');
   if (!btn) return;
-  const { failures } = await sendMessage<{ failures: UnbookmarkFailure[] }>({ action: 'list_unbookmark_failures' });
+  const { failures } = await sendMessage({ action: 'list_unbookmark_failures' });
   btn.hidden = failures.length === 0;
   btn.innerText = `解除失敗 ${failures.length}件 · 再試行`;
 }
 
 async function retryUnbookmarkFailures(): Promise<void> {
-  const { queued } = await sendMessage<{ queued: number }>({ action: 'retry_unbookmark_failures' });
+  const { queued } = await sendMessage({ action: 'retry_unbookmark_failures' });
   await updateUnbookmarkFailures();
   window.alert(queued > 0 ? `${queued}件の解除を再試行します` : '再試行が必要なポストはありません');
 }
@@ -874,7 +868,7 @@ function localDateStamp(date: Date): string {
 }
 
 async function exportAllData(): Promise<void> {
-  const data = await sendMessage<ExportData>({ action: 'export_data' });
+  const data = await sendMessage({ action: 'export_data' });
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -900,7 +894,7 @@ async function importFromFile(file: File): Promise<void> {
   );
   if (!confirmed) return;
 
-  const response = await sendMessage<{ ok: boolean; error?: string; imported: number }>({
+  const response = await sendMessage({
     action: 'import_data',
     data
   });
@@ -916,16 +910,17 @@ async function importFromFile(file: File): Promise<void> {
   window.alert(`${response.imported}件を読み込みました`);
 }
 
-/** 処理中でなければ task を実行する。拡張機能の再読み込みによるエラーは握りつぶす */
+/** 処理中でなければ task を実行する。失敗したら知らせる（拡張機能の再読み込みによるものは除く） */
 async function runExclusive(task: () => Promise<void>): Promise<void> {
   if (isBusy) return;
   isBusy = true;
   try {
     await task();
   } catch (error) {
-    if (!isContextInvalidatedError(error)) {
-      throw error;
-    }
+    if (isContextInvalidatedError(error)) return;
+    console.error(error);
+    const detail = error instanceof Error ? error.message : String(error);
+    window.alert(`処理に失敗しました: ${detail}`);
   } finally {
     isBusy = false;
   }

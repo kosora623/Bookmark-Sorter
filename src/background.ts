@@ -3,8 +3,12 @@ import { db, type BookmarkPost } from './db';
 import {
   isExtensionRequest,
   type ExportData,
-  type ExtensionRequest,
+  type ExtensionAction,
+  type ExtensionReply,
   type FolderInfo,
+  type FolderMutationResult,
+  type RequestOf,
+  type ResponseOf,
   type UnbookmarkFailure
 } from './messages';
 import { MAX_KEPT_PAGE_LIMIT, listKept } from './kept-query';
@@ -238,12 +242,6 @@ async function listFolders(): Promise<{ folders: FolderInfo[] }> {
       locked: name === DEFAULT_FOLDER
     }))
   };
-}
-
-interface FolderMutationResult {
-  ok: boolean;
-  error?: string;
-  folders: FolderInfo[];
 }
 
 /** 成否にかかわらず最新のフォルダ一覧を添えて返す */
@@ -499,13 +497,11 @@ chrome.action.onClicked.addListener(() => {
 });
 
 type Sender = chrome.runtime.MessageSender;
-type Action = ExtensionRequest['action'];
-type RequestOf<A extends Action> = Extract<ExtensionRequest, { action: A }>;
 
-interface Route<A extends Action> {
+interface Route<A extends ExtensionAction> {
   /** 送信元の確認。通らなければ応答しない */
   allow: (sender: Sender) => boolean;
-  handle: (message: RequestOf<A>) => unknown;
+  handle: (message: RequestOf<A>) => ResponseOf<A> | Promise<ResponseOf<A>>;
 }
 
 const fromXOrExtensionPage = (sender: Sender): boolean => isXContentScript(sender) || isExtensionPage(sender);
@@ -514,7 +510,7 @@ const stringOr = (value: unknown, fallback: string): string => (typeof value ===
 const numberOr = (value: unknown, fallback: number): number => (typeof value === 'number' ? value : fallback);
 
 // action ごとの処理。型で全 action を網羅させる
-const routes: { [A in Action]: Route<A> } = {
+const routes: { [A in ExtensionAction]: Route<A> } = {
   save_posts: { allow: isXContentScript, handle: (m) => savePosts(m.posts) },
   // 実際の完了通知は runOneUnbookmark の listener が受け取る。ここでは応答だけ返す
   unbookmark_done: { allow: isXContentScript, handle: () => ({ ok: true }) },
@@ -529,7 +525,7 @@ const routes: { [A in Action]: Route<A> } = {
     allow: isExtensionPage,
     handle: async (m) => {
       if (m.tweetUrl) await enqueueUnbookmark(m.tweetUrl);
-      return { status: 'ok' };
+      return { ok: true };
     }
   },
   cancel_unbookmark: {
@@ -580,9 +576,17 @@ const routes: { [A in Action]: Route<A> } = {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isExtensionRequest(message)) return;
 
-  const route = routes[message.action] as Route<Action>;
+  const route = routes[message.action] as Route<ExtensionAction>;
   if (!route.allow(sender)) return;
 
-  void Promise.resolve(route.handle(message)).then(sendResponse);
+  // 例外でも必ず返信する。返さないと送信側の await が終わらず、ダッシュボードが操作を受け付けなくなる
+  void (async (): Promise<ExtensionReply<unknown>> => {
+    try {
+      return { data: await route.handle(message) };
+    } catch (error) {
+      console.error(`${message.action} の処理に失敗しました`, error);
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
+  })().then(sendResponse);
   return true;
 });
