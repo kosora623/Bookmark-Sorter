@@ -36,6 +36,19 @@ export function isXStatusUrl(value: string): boolean {
   return statusIdFromUrl(value) !== undefined;
 }
 
+/** X のポスト URL からクエリとハッシュを落とす。ポスト URL でなければ undefined */
+export function sanitizeStatusUrl(value: string): string | undefined {
+  if (!isXStatusUrl(value)) return undefined;
+  try {
+    const parsed = new URL(value);
+    parsed.hash = '';
+    parsed.search = '';
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * タイムラインの画像は name=small / 360x360 などの縮小版なので、pbs.twimg.com/media の画像は
  * name=large に揃える。それ以外（カード画像・動画サムネイル）はそのまま返す。

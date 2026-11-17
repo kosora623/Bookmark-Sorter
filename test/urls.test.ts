@@ -4,6 +4,7 @@ import {
   isXHostUrl,
   isXStatusUrl,
   normalizeImageUrls,
+  sanitizeStatusUrl,
   statusIdFromUrl,
   toLargeImageUrl
 } from '../src/urls';
@@ -71,5 +72,13 @@ describe('normalizeImageUrls', () => {
         42
       ])
     ).toEqual(['https://pbs.twimg.com/media/A?format=jpg&name=large']);
+  });
+});
+
+describe('sanitizeStatusUrl', () => {
+  it('クエリとハッシュを落とし、ポスト URL 以外は undefined', () => {
+    expect(sanitizeStatusUrl('https://x.com/a/status/1?s=20#top')).toBe('https://x.com/a/status/1');
+    expect(sanitizeStatusUrl('https://x.com/home')).toBeUndefined();
+    expect(sanitizeStatusUrl('https://example.com/a/status/1')).toBeUndefined();
   });
 });

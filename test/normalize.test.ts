@@ -81,6 +81,11 @@ describe('toBookmarkPost', () => {
     expect('hasVideo' in toBookmarkPost(post({ hasVideo: 'yes' as never }))).toBe(false);
   });
 
+  it('フォルダ名を整形し、空になるものは既定のフォルダにする', () => {
+    expect(toBookmarkPost(post({ folder: ' 技術 ' })).folder).toBe('技術');
+    expect(toBookmarkPost(post({ folder: '   ' })).folder).toBe(DEFAULT_FOLDER);
+  });
+
   it('知らないフィールドは捨てる', () => {
     const result = toBookmarkPost({ ...post(), injected: true } as BookmarkPost);
     expect('injected' in result).toBe(false);
@@ -92,6 +97,12 @@ describe('sanitizeChanges', () => {
     expect(sanitizeChanges({ folder: 'A', status: 'kept' })).toEqual({ folder: 'A', status: 'kept' });
     expect(sanitizeChanges({ status: 'bogus' } as never)).toEqual({});
     expect(sanitizeChanges({ folder: 1 } as never)).toEqual({});
+  });
+
+  it('フォルダ名はフォルダ追加と同じように整形し、空になるものは捨てる', () => {
+    expect(sanitizeChanges({ folder: '  技術   メモ ' })).toEqual({ folder: '技術 メモ' });
+    expect(sanitizeChanges({ folder: 'x'.repeat(50) }).folder).toHaveLength(40);
+    expect(sanitizeChanges({ folder: '   ', status: 'kept' })).toEqual({ status: 'kept' });
   });
 });
 

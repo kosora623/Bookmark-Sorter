@@ -3,6 +3,7 @@
   "name": "X Bookmark Sorter",
   "description": "Twitterのブックマークをローカルに収集し、フォルダ分けして整理するツールです。",
   "permissions": [
+    "alarms",
     "storage",
     "unlimitedStorage"
   ],
