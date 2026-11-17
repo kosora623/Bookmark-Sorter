@@ -37,6 +37,10 @@ const MAX_UNBOOKMARK_ATTEMPTS = 3;
 const MAX_UNBOOKMARK_FAILURES = 500;
 const UNBOOKMARK_STORAGE_KEY = 'unbookmarkQueue';
 const UNBOOKMARK_FAILED_KEY = 'unbookmarkFailed';
+// キューが残っている間だけ張っておくアラーム。Service Worker が止まっても、これで起こして再開する。
+// chrome.alarms の最短間隔は 30 秒なので、通常の待ち合わせは setTimeout で行い、アラームは保険にとどめる
+const UNBOOKMARK_ALARM = 'unbookmark-queue';
+const UNBOOKMARK_ALARM_PERIOD_MINUTES = 1;
 const MAX_UNPROCESSED_LIMIT = 50;
 
 interface UnbookmarkJob {
@@ -117,6 +121,22 @@ async function retryUnbookmarkFailures(): Promise<{ queued: number }> {
 
 async function persistUnbookmarkQueue(): Promise<void> {
   await chrome.storage.local.set({ [UNBOOKMARK_STORAGE_KEY]: unbookmarkQueue });
+  await syncQueueAlarm();
+}
+
+/**
+ * キューが残っていればアラームを張り直し、空なら外す。
+ * 張り直すたびに発火が先送りされるので、処理が進んでいる間は発火せず、止まったときだけ発火する。
+ */
+async function syncQueueAlarm(): Promise<void> {
+  if (unbookmarkQueue.length === 0) {
+    await chrome.alarms.clear(UNBOOKMARK_ALARM);
+    return;
+  }
+  await chrome.alarms.create(UNBOOKMARK_ALARM, {
+    delayInMinutes: UNBOOKMARK_ALARM_PERIOD_MINUTES,
+    periodInMinutes: UNBOOKMARK_ALARM_PERIOD_MINUTES
+  });
 }
 
 function wakeQueue(): void {
@@ -483,6 +503,8 @@ async function restoreUnbookmarkQueue(): Promise<void> {
     const stored = await chrome.storage.local.get(UNBOOKMARK_STORAGE_KEY);
     const raw = stored[UNBOOKMARK_STORAGE_KEY];
     unbookmarkQueue = Array.isArray(raw) ? raw.filter(isUnbookmarkJob) : [];
+    // 前回の Service Worker が張ったアラームを、復元したキューの状態に合わせる
+    await syncQueueAlarm();
   } catch (error) {
     console.error(error);
   }
@@ -490,7 +512,20 @@ async function restoreUnbookmarkQueue(): Promise<void> {
 
 // Service Worker 起動直後に届いたメッセージが、復元前の空キューを上書きしないよう待ち合わせる
 const queueReady = restoreUnbookmarkQueue();
-void queueReady.then(() => processUnbookmarkQueue());
+
+function resumeUnbookmarkQueue(): void {
+  void queueReady.then(() => processUnbookmarkQueue());
+}
+
+// どのイベントで起きても、まずキューの続きを始める（実行中なら processUnbookmarkQueue が何もしない）
+resumeUnbookmarkQueue();
+
+// 以下の 2 つは Service Worker を起こすためのきっかけ。リスナーはトップレベルで同期的に登録する必要がある
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === UNBOOKMARK_ALARM) resumeUnbookmarkQueue();
+});
+// アラームはブラウザの再起動で消えることがあるので、起動時にも再開する
+chrome.runtime.onStartup.addListener(resumeUnbookmarkQueue);
 
 chrome.action.onClicked.addListener(() => {
   void openDashboard();
