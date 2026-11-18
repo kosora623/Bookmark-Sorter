@@ -805,11 +805,18 @@
 
     .folder-item.active .folder-item-count { color: inherit; opacity: 0.7; }
 
-    .folder-delete {
+    /* 名前の変更・削除。行にカーソルを乗せたときだけ、件数の上に重ねて出す */
+    .folder-tools {
       position: absolute;
       right: 4px;
       top: 50%;
       transform: translateY(-50%);
+      display: flex;
+      gap: 2px;
+      opacity: 0;
+    }
+
+    .folder-tool {
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -821,25 +828,38 @@
       border-radius: 50%;
       background: none;
       color: var(--ink-2);
-      opacity: 0;
     }
 
-    .folder-row:hover .folder-delete,
-    .folder-delete:focus-visible { opacity: 1; }
+    .folder-row:hover .folder-tools,
+    .folder-tools:focus-within { opacity: 1; }
 
-    /* 削除ボタンが出ている間は、その下の件数を隠す */
-    .folder-row:hover:has(.folder-delete) .folder-item-count,
-    .folder-row:has(.folder-delete:focus-visible) .folder-item-count { visibility: hidden; }
+    /* ボタンが出ている間は、その下の件数を隠す */
+    .folder-row:hover:has(.folder-tools) .folder-item-count,
+    .folder-row:has(.folder-tools:focus-within) .folder-item-count { visibility: hidden; }
 
-    .folder-item.active + .folder-delete { color: var(--on-strong); }
+    .folder-item.active + .folder-tools .folder-tool { color: var(--on-strong); }
 
+    .folder-tool:hover { color: var(--ink); background: var(--slot); }
     .folder-delete:hover { color: var(--cut); background: var(--cut-soft); }
 
     @media (hover: none) {
-      .folder-delete { position: static; transform: none; opacity: 0.7; }
+      .folder-tools { position: static; transform: none; opacity: 0.7; }
     }
 
-    .folder-delete svg,
+    .folder-row.renaming .folder-tools { display: none; }
+
+    .folder-rename-input {
+      flex: 1;
+      min-width: 0;
+      padding: 7px 10px;
+      border: 2px solid var(--save);
+      border-radius: 9999px;
+      background: var(--surface);
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    .folder-tool svg,
     .open-link svg,
     .kept-open svg {
       display: block;
@@ -991,6 +1011,127 @@
 
     .kept-more:hover { background: var(--slot); }
 
+    /* ---------- 並べ替え・まとめて移動 ---------- */
+
+    .folder-row[draggable="true"] { cursor: grab; }
+    .pane-hint { margin: -4px 4px 12px; color: var(--ink-2); font-size: 12px; line-height: 1.5; }
+    .folder-row.dragging { opacity: 0.4; }
+
+    /* 並べ替えの落とし先は線、ポストの移動先は枠で見せる */
+    .folder-row.drop-before::before,
+    .folder-row.drop-after::after {
+      content: "";
+      position: absolute;
+      left: 8px;
+      right: 8px;
+      height: 2px;
+      border-radius: 1px;
+      background: var(--save);
+      pointer-events: none;
+    }
+    .folder-row.drop-before::before { top: -2px; }
+    .folder-row.drop-after::after { bottom: -2px; }
+    .folder-row.drop-into .folder-item {
+      background: color-mix(in srgb, var(--save) 15%, transparent);
+      box-shadow: inset 0 0 0 2px var(--save);
+    }
+
+    .kept-check {
+      flex-shrink: 0;
+      width: 18px;
+      height: 18px;
+      margin: 2px 0 0 4px;
+      accent-color: var(--save);
+      cursor: pointer;
+    }
+
+    .kept-row.selected { background: color-mix(in srgb, var(--save) 9%, transparent); }
+    .kept-row.selected:hover { background: color-mix(in srgb, var(--save) 13%, transparent); }
+
+    /*
+     * 選択中の操作は画面の下に浮かせる。一覧の中に差し込むと、1 件目を選んだ瞬間に行が下へずれて
+     * 次のクリック（Shift+クリックなど）が別の行に当たってしまうため
+     */
+    .kept-selection {
+      position: fixed;
+      left: 50%;
+      bottom: 20px;
+      z-index: 900;
+      transform: translateX(-50%);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 12px;
+      width: max-content;
+      max-width: calc(100vw - 32px);
+      padding: 8px 8px 8px 20px;
+      border-radius: 9999px;
+      box-shadow: 0 8px 28px rgba(15, 20, 25, 0.28);
+      background: var(--ink);
+      color: var(--on-strong);
+      font-size: 14px;
+    }
+    .kept-selection[hidden] { display: none; }
+
+    /* 帯が出ている間は、最後の行やトーストが帯の下に隠れないようにする */
+    #app:has(#kept-selection:not([hidden])) .kept-main { padding-bottom: 80px; }
+    body:has(#kept-selection:not([hidden])) .toast-area { bottom: 88px; }
+
+    @media (max-width: 720px) {
+      .kept-selection { border-radius: 20px; justify-content: center; }
+      .kept-selection .sel-move { margin-left: 0; }
+    }
+
+    .kept-selection-count { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+    .kept-selection .sel-link {
+      padding: 4px 8px;
+      border: 0;
+      border-radius: 9999px;
+      background: none;
+      color: inherit;
+      font-size: 13px;
+      opacity: 0.8;
+    }
+    .kept-selection .sel-link:hover { opacity: 1; text-decoration: underline; }
+
+    .kept-selection .sel-move {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: auto;
+    }
+
+    .kept-selection select {
+      max-width: 180px;
+      padding: 6px 10px;
+      border: 0;
+      border-radius: 9999px;
+      background: var(--surface);
+      color: var(--ink);
+      font-size: 13px;
+    }
+
+    .kept-selection .sel-submit {
+      padding: 6px 16px;
+      border: 0;
+      border-radius: 9999px;
+      background: var(--save);
+      color: #fff;
+      font-weight: 700;
+    }
+    .kept-selection .sel-submit:hover { background: var(--save-hover); }
+
+    .kept-selection .sel-danger {
+      padding: 6px 14px;
+      border: 1px solid var(--cut);
+      border-radius: 9999px;
+      background: none;
+      color: var(--cut);
+      font-weight: 700;
+    }
+    .kept-selection .sel-danger:hover { background: var(--cut); color: #fff; }
+
     /* ---------- トースト・確認ダイアログ（src/dashboard/notify.ts） ---------- */
 
     .toast-area {
@@ -1020,6 +1161,20 @@
 
     .toast-success { background: var(--save); color: #fff; }
     .toast-error { background: var(--cut); color: #fff; }
+
+    .toast:has(.toast-action) { display: flex; align-items: center; gap: 16px; }
+
+    .toast-action {
+      flex-shrink: 0;
+      margin-left: auto;
+      padding: 4px 12px;
+      border: 1px solid currentColor;
+      border-radius: 9999px;
+      background: none;
+      color: inherit;
+      font-weight: 700;
+    }
+    .toast-action:hover { background: color-mix(in srgb, currentColor 15%, transparent); }
 
 
     .modal-backdrop {
@@ -1199,6 +1354,7 @@
           <aside class="folder-pane">
             <h2 class="pane-title">フォルダ</h2>
             <ul id="folder-list" class="folder-list"></ul>
+            <p class="pane-hint">ドラッグで並べ替え。ポストをフォルダへドラッグすると移動します</p>
             <form id="add-folder-form" class="add-folder-form">
               <input id="add-folder-input" type="text" maxlength="40" placeholder="新しいフォルダ名" aria-label="新しいフォルダ名" />
               <button type="submit">追加</button>
@@ -1213,10 +1369,20 @@
               <h2 id="kept-heading" class="kept-heading">未分類</h2>
               <span id="kept-total" class="kept-total"></span>
             </div>
+            <form id="kept-selection" class="kept-selection" aria-label="選択したポストの操作" hidden>
+              <span id="kept-selection-count" class="kept-selection-count">0件を選択中</span>
+              <button type="button" id="kept-select-all" class="sel-link">表示中をすべて選択</button>
+              <button type="button" id="kept-select-clear" class="sel-link">選択を解除（Esc）</button>
+              <span class="sel-move">
+                <select id="kept-move-target" aria-label="移動先のフォルダ"></select>
+                <button type="submit" class="sel-submit">へ移動</button>
+                <button type="button" id="kept-discard" class="sel-danger" title="削除して Twitter のブックマークも解除します">削除</button>
+              </span>
+            </form>
             <div id="kept-list" class="kept-list"></div>
             <div id="kept-empty" class="empty-state kept-empty" hidden>
               <p class="empty-title">このフォルダは空です</p>
-              <p class="empty-sub">選別で → を押すと、選んでいるフォルダに保存されます</p>
+              <p class="empty-sub">選別画面でフォルダを選ぶと、ここに入ります</p>
             </div>
             <button type="button" id="kept-more" class="kept-more" hidden>さらに表示</button>
           </div>

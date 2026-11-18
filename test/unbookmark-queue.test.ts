@@ -76,6 +76,28 @@ describe('UnbookmarkQueue', () => {
     expect(queue.size).toBe(1);
   });
 
+  it('isRunning は run に渡している間だけ true', async () => {
+    const { run, finish } = controllableRun();
+    const { queue } = createQueue(run);
+    await queue.enqueue(A, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(queue.isRunning(A)).toBe(true);
+    finish(A, true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(queue.isRunning(A)).toBe(false);
+  });
+
+  it('まとめて入れるときは保存を 1 回にし、入っているものは飛ばす', async () => {
+    const { queue, persisted } = createQueue(controllableRun().run);
+    await queue.enqueue(A, 1_000);
+    const before = persisted.length;
+    expect(await queue.enqueueMany([A, B, B], 1_000)).toBe(1);
+    expect(persisted.length).toBe(before + 1);
+    expect(queue.snapshot().map((job) => job.url)).toEqual([A, B]);
+    expect(await queue.enqueueMany([A, B], 1_000)).toBe(0);
+    expect(persisted.length).toBe(before + 1);
+  });
+
   it('失敗したら待ってから再試行し、規定回数で諦めて記録する', async () => {
     const { run, finish } = controllableRun();
     const { queue, giveUp } = createQueue(run);

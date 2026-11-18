@@ -125,3 +125,25 @@ describe('confirmDialog', () => {
     document.removeEventListener('keydown', pageHandler);
   });
 });
+
+describe('showToast（操作つき）', () => {
+  it('ボタンを押すと onClick を呼んで消え、指定の時間まで出しておく', () => {
+    vi.useFakeTimers();
+    const onClick = vi.fn();
+    showToast('3件を削除しました', 'info', { label: '取り消す', onClick, durationMs: 10_000 });
+
+    vi.advanceTimersByTime(9_000);
+    const action = document.querySelector<HTMLButtonElement>('.toast-action');
+    expect(action?.textContent).toBe('取り消す');
+    action?.click();
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('.toast')).toBeNull();
+  });
+
+  it('数が多すぎるときは、操作つきのトーストを残して古いものから消す', () => {
+    showToast('取り消せる', 'info', { label: '取り消す', onClick: () => {} });
+    for (const text of ['a', 'b', 'c']) showToast(text);
+    const texts = [...document.querySelectorAll('.toast')].map((toast) => toast.firstChild?.textContent);
+    expect(texts).toEqual(['取り消せる', 'b', 'c']);
+  });
+});

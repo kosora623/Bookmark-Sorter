@@ -86,6 +86,51 @@ function fakeBackground(message: ExtensionRequest): unknown {
       for (const p of posts.values()) if (p.folder === message.name) p.folder = DEFAULT_FOLDER;
       return { ok: true, folders: folderInfos() };
     }
+    case 'move_bookmarks': {
+      let moved = 0;
+      for (const id of message.ids) {
+        const stored = posts.get(id);
+        if (stored && folderNames.includes(message.folder)) {
+          stored.folder = message.folder;
+          moved++;
+        }
+      }
+      return { ok: moved > 0, moved, folders: folderInfos() };
+    }
+    case 'rename_folder': {
+      const newName = message.newName.trim();
+      if (folderNames.includes(newName)) return { ok: false, error: '同じ名前のフォルダがあります', folders: folderInfos() };
+      folderNames[folderNames.indexOf(message.name)] = newName;
+      for (const p of posts.values()) if (p.folder === message.name) p.folder = newName;
+      return { ok: true, folders: folderInfos() };
+    }
+    case 'discard_bookmarks': {
+      let discarded = 0;
+      for (const id of message.ids) {
+        const stored = posts.get(id);
+        if (stored?.status === 'kept') {
+          stored.status = 'discarded';
+          discarded++;
+        }
+      }
+      return { discarded, folders: folderInfos() };
+    }
+    case 'restore_bookmarks': {
+      let restored = 0;
+      for (const id of message.ids) {
+        const stored = posts.get(id);
+        if (stored?.status === 'discarded') {
+          stored.status = 'kept';
+          restored++;
+        }
+      }
+      return { restored, unbookmarked: 0, folders: folderInfos() };
+    }
+    case 'reorder_folders': {
+      const next = message.names.filter((name) => folderNames.includes(name));
+      folderNames.splice(0, folderNames.length, ...next, ...folderNames.filter((name) => !next.includes(name)));
+      return { ok: true, folders: folderInfos() };
+    }
     default:
       throw new Error(`テストで用意していない action: ${message.action}`);
   }
@@ -268,5 +313,81 @@ describe('ダッシュボード', () => {
 
     await vi.waitFor(() => expect(folderItems()).toEqual([DEFAULT_FOLDER, '技術']));
     expect(lastSent('delete_folder')).toEqual({ action: 'delete_folder', name: '料理' });
+  });
+
+  it('チェックを入れたポストを、帯の操作で別のフォルダへまとめて移す', async () => {
+    [...document.querySelectorAll<HTMLElement>('#folder-list .folder-item')].find((el) => el.dataset.folder === '技術')?.click();
+    await vi.waitFor(() => expect(document.querySelectorAll('#kept-list .kept-row').length).toBeGreaterThan(0));
+    const bar = document.getElementById('kept-selection') as HTMLFormElement;
+    expect(bar.hidden).toBe(true);
+
+    const row = document.querySelector<HTMLElement>('#kept-list .kept-row');
+    const id = row?.dataset.id;
+    row?.querySelector<HTMLInputElement>('.kept-check')?.click();
+    expect(bar.hidden).toBe(false);
+    expect(document.getElementById('kept-selection-count')?.textContent).toBe('1件を選択中');
+    // 開いているフォルダ以外が移動先に選ばれている
+    expect((document.getElementById('kept-move-target') as HTMLSelectElement).value).toBe(DEFAULT_FOLDER);
+
+    bar.dispatchEvent(new Event('submit', { cancelable: true }));
+    await vi.waitFor(() => expect(lastSent('move_bookmarks')).toEqual({ action: 'move_bookmarks', ids: [id], folder: DEFAULT_FOLDER }));
+    await vi.waitFor(() => expect(document.querySelector(`#kept-list .kept-row[data-id="${id}"]`)).toBeNull());
+    expect(bar.hidden).toBe(true);
+    expect(toastTexts().some((text) => text.includes(`「${DEFAULT_FOLDER}」に移動しました`))).toBe(true);
+  });
+
+  it('Alt+↓ でフォルダを 1 つ下へ並べ替える', async () => {
+    const item = document.querySelector<HTMLElement>(`#folder-list .folder-item[data-folder="${DEFAULT_FOLDER}"]`);
+    item?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }));
+
+    await vi.waitFor(() => expect(folderItems()).toEqual(['技術', DEFAULT_FOLDER]));
+    expect(lastSent('reorder_folders')).toEqual({ action: 'reorder_folders', names: ['技術', DEFAULT_FOLDER] });
+    // 選別画面の棚（数字キーの順）も同じ並びになる
+    const slots = [...document.querySelectorAll<HTMLElement>('#folder-rack .slot')].map((el) => el.dataset.folder);
+    expect(slots).toEqual(['技術', DEFAULT_FOLDER]);
+  });
+
+  it('鉛筆ボタンでフォルダ名をその場で変え、Enter で確定する', async () => {
+    document.querySelector<HTMLElement>('#folder-list [data-action="rename-folder"][data-folder="技術"]')?.click();
+    const input = document.querySelector<HTMLInputElement>('#folder-list .folder-rename-input');
+    expect(input?.value).toBe('技術');
+
+    input!.value = '開発';
+    input!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await vi.waitFor(() => expect(folderItems()).toEqual(['開発', DEFAULT_FOLDER]));
+    expect(lastSent('rename_folder')).toEqual({ action: 'rename_folder', name: '技術', newName: '開発' });
+    expect(document.querySelector('#folder-list .folder-rename-input')).toBeNull();
+  });
+
+  it('Esc なら名前を変えずに戻す', () => {
+    const before = sent.length;
+    document.querySelector<HTMLElement>('#folder-list [data-action="rename-folder"][data-folder="開発"]')?.click();
+    const input = document.querySelector<HTMLInputElement>('#folder-list .folder-rename-input');
+    input!.value = 'xxx';
+    input!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(folderItems()).toEqual(['開発', DEFAULT_FOLDER]);
+    expect(sent.slice(before).some((m) => m.action === 'rename_folder')).toBe(false);
+  });
+
+  it('選んだポストを確認のうえまとめて削除し、トーストから取り消せる', async () => {
+    document.querySelector<HTMLElement>(`#folder-list .folder-item[data-folder="${DEFAULT_FOLDER}"]`)?.click();
+    await vi.waitFor(() => expect(document.querySelectorAll('#kept-list .kept-row').length).toBeGreaterThan(0));
+    const ids = [...document.querySelectorAll<HTMLElement>('#kept-list .kept-row')].map((row) => row.dataset.id);
+
+    document.querySelector<HTMLInputElement>('#kept-list .kept-check')?.click();
+    document.getElementById('kept-select-all')?.click();
+    document.getElementById('kept-discard')?.click();
+    await vi.waitFor(() => expect(document.querySelector('.modal')).not.toBeNull());
+    expect(document.querySelector('.modal')?.textContent).toContain(`${ids.length}件を削除し`);
+    document.querySelector<HTMLButtonElement>('.modal button[data-role="confirm"]')?.click();
+
+    await vi.waitFor(() => expect(lastSent('discard_bookmarks')).toEqual({ action: 'discard_bookmarks', ids }));
+    await vi.waitFor(() => expect(document.querySelectorAll('#kept-list .kept-row')).toHaveLength(0));
+
+    const undo = [...document.querySelectorAll<HTMLButtonElement>('.toast-action')].at(-1);
+    expect(undo?.textContent).toBe('取り消す');
+    undo?.click();
+    await vi.waitFor(() => expect(lastSent('restore_bookmarks')).toEqual({ action: 'restore_bookmarks', ids }));
+    await vi.waitFor(() => expect(document.querySelectorAll('#kept-list .kept-row')).toHaveLength(ids.length));
   });
 });

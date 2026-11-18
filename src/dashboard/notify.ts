@@ -17,8 +17,18 @@ function toastArea(): HTMLElement {
   return area;
 }
 
-/** 画面の隅に短いメッセージを出す。しばらくすると消え、クリックでもすぐ消せる */
-export function showToast(message: string, kind: ToastKind = 'info'): void {
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+  /** 表示しておく時間。省略時は種類ごとの既定 */
+  durationMs?: number;
+}
+
+/**
+ * 画面の隅に短いメッセージを出す。しばらくすると消え、クリックでもすぐ消せる。
+ * action を渡すと「取り消す」などのボタンを添える（押したら消える）。
+ */
+export function showToast(message: string, kind: ToastKind = 'info', action?: ToastAction): void {
   const area = toastArea();
   const toast = document.createElement('div');
   toast.className = `toast toast-${kind}`;
@@ -30,11 +40,28 @@ export function showToast(message: string, kind: ToastKind = 'info'): void {
     clearTimeout(timer);
     toast.remove();
   };
-  const timer = setTimeout(close, TOAST_MS[kind]);
+  const timer = setTimeout(close, action?.durationMs ?? TOAST_MS[kind]);
   toast.addEventListener('click', close);
 
+  if (action) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'toast-action';
+    button.textContent = action.label;
+    button.addEventListener('click', (e) => {
+      e.stopPropagation();
+      close();
+      action.onClick();
+    });
+    toast.appendChild(button);
+  }
+
   area.appendChild(toast);
-  while (area.children.length > MAX_TOASTS) area.firstElementChild?.remove();
+  // 多すぎたら古いものから消す。「取り消す」などの操作つきは、ほかが残っている限り消さない
+  while (area.children.length > MAX_TOASTS) {
+    const victim = [...area.children].find((el) => !el.querySelector('.toast-action')) ?? area.firstElementChild;
+    victim?.remove();
+  }
 }
 
 export interface ConfirmOptions {

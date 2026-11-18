@@ -302,3 +302,31 @@ describe('findPrimaryTweet / findRemoveBookmarkButton', () => {
     expect(primary && findRemoveBookmarkButton(primary)).toBeNull();
   });
 });
+
+describe('findPrimaryTweet（返信のページ）', () => {
+  it('上に並ぶ返信先ではなく、URL のポストを選ぶ', () => {
+    document.body.innerHTML =
+      tweetHtml({ id: '1', handle: 'parent', bookmarked: false }) + tweetHtml({ id: '2', bookmarked: true });
+
+    const primary = findPrimaryTweet('2');
+    expect(primary?.querySelector('time')?.closest('a')?.getAttribute('href')).toBe('/jack/status/2');
+    expect(primary && findRemoveBookmarkButton(primary)).not.toBeNull();
+  });
+
+  it('日時がリンクでない本体のポストにも落とせる', () => {
+    document.body.innerHTML =
+      tweetHtml({ id: '1', handle: 'parent', bookmarked: false }) +
+      tweetHtml({ id: '2', noTimeLink: true, bookmarked: true });
+    expect(findPrimaryTweet('2') && findRemoveBookmarkButton(findPrimaryTweet('2') as HTMLElement)).not.toBeNull();
+  });
+
+  it('引用ポストの中の解除ボタンは本体のものとみなさない', () => {
+    document.body.innerHTML = tweetHtml({
+      id: '1',
+      bookmarked: false,
+      body: quoteHtml({ id: '2', handle: 'other', bookmarked: true }, { asArticle: true })
+    });
+    const primary = findPrimaryTweet('1');
+    expect(primary && findRemoveBookmarkButton(primary)).toBeNull();
+  });
+});

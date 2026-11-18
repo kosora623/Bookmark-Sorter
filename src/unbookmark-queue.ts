@@ -37,6 +37,8 @@ export interface UnbookmarkQueueOptions {
 export class UnbookmarkQueue {
   private jobs: UnbookmarkJob[] = [];
   private running = false;
+  /** いま run に渡している URL。取り消しても、もう止められない */
+  private current: string | null = null;
   private wakeWait: (() => void) | null = null;
   private readonly options: UnbookmarkQueueOptions;
   private readonly now: () => number;
@@ -52,6 +54,10 @@ export class UnbookmarkQueue {
 
   has(url: string): boolean {
     return this.jobs.some((job) => job.url === url);
+  }
+
+  isRunning(url: string): boolean {
+    return this.current === url;
   }
 
   snapshot(): readonly UnbookmarkJob[] {
@@ -70,6 +76,21 @@ export class UnbookmarkQueue {
     await this.options.persist(this.jobs);
     void this.process();
     return true;
+  }
+
+  /** まとめて delayMs 後に解除する。保存は 1 回だけ。新しく入れた件数を返す */
+  async enqueueMany(urls: readonly string[], delayMs: number): Promise<number> {
+    const earliest = this.now() + delayMs;
+    let added = 0;
+    for (const url of urls) {
+      if (this.has(url)) continue;
+      this.jobs.push({ url, earliest });
+      added++;
+    }
+    if (added === 0) return 0;
+    await this.options.persist(this.jobs);
+    void this.process();
+    return added;
   }
 
   /** 指定の URL を取り除く（Undo 用）。実行中のものは、終わったときに結果を捨てる */
@@ -103,7 +124,13 @@ export class UnbookmarkQueue {
           continue;
         }
 
-        const ok = await this.options.run(job.url);
+        this.current = job.url;
+        let ok: boolean;
+        try {
+          ok = await this.options.run(job.url);
+        } finally {
+          this.current = null;
+        }
         // 実行中に Undo や全消去でキューから外れていたら、結果は捨てる
         if (this.jobs[0] !== job) continue;
         this.jobs.shift();
