@@ -1,7 +1,6 @@
 // ダッシュボードのエントリー。各画面の部品は src/dashboard/ にあり、ここでは
 // タブの切り替え・データ全体の操作の後始末・初期化と、画面をまたぐイベントの登録だけを行う。
 import { logUnexpected } from './runtime';
-import { loadLastFolder } from './dashboard/api';
 import {
   clearAllData,
   exportAllData,
@@ -9,16 +8,16 @@ import {
   retryUnbookmarkFailures,
   updateUnbookmarkFailures
 } from './dashboard/data';
-import { loadFolders, renderFolderRack, sortFolderSelect } from './dashboard/folders';
+import { loadFolders, renderFolderRack } from './dashboard/folders';
 import { showToast } from './dashboard/notify';
+import { bindThemeMenu } from './dashboard/theme';
 import { addFolderFromInput, bindKeptView, loadKeptView, resetKeptState } from './dashboard/kept-view';
-import { bindSortView, clearDiscardArm, loadNextPost, resetSortState } from './dashboard/sort-view';
+import { bindSortView, loadNextPost, resetSortState } from './dashboard/sort-view';
 import { runExclusive, state, type ViewMode } from './dashboard/state';
 
 const FAILURE_POLL_MS = 10_000;
 
 function setView(mode: ViewMode): void {
-  if (mode !== 'sort') clearDiscardArm();
   state.viewMode = mode;
   const sortView = document.getElementById('sort-view');
   const keptView = document.getElementById('kept-view');
@@ -47,6 +46,7 @@ async function reloadAll(): Promise<void> {
   if (state.viewMode === 'kept') await loadKeptView();
 }
 
+bindThemeMenu();
 bindSortView();
 bindKeptView();
 
@@ -65,19 +65,26 @@ for (const [formId, inputId] of [
   });
 }
 
-// データのメニューは、項目を選んだら・外をクリックしたら・Esc で閉じる
-const dataMenu = document.getElementById('data-menu');
-if (dataMenu instanceof HTMLDetailsElement) {
-  dataMenu.addEventListener('click', (e) => {
-    if ((e.target as HTMLElement | null)?.closest('.menu-item')) dataMenu.open = false;
+// ヘッダーのメニュー（表示・データ）は、外をクリックしたら・Esc で閉じる。
+// データの項目は選んだら閉じる。表示のテーマは見比べられるよう、選んでも開いたままにする。
+for (const menu of document.querySelectorAll<HTMLDetailsElement>('header details.data-menu')) {
+  menu.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement | null)?.closest('.menu-item')) menu.open = false;
   });
   document.addEventListener('click', (e) => {
-    if (dataMenu.open && !dataMenu.contains(e.target as Node)) dataMenu.open = false;
+    if (menu.open && !menu.contains(e.target as Node)) menu.open = false;
   });
-  dataMenu.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && dataMenu.open) {
-      dataMenu.open = false;
-      dataMenu.querySelector('summary')?.focus();
+  menu.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && menu.open) {
+      menu.open = false;
+      menu.querySelector('summary')?.focus();
+    }
+  });
+  // 片方を開いたら、もう片方は閉じる
+  menu.addEventListener('toggle', () => {
+    if (!menu.open) return;
+    for (const other of document.querySelectorAll<HTMLDetailsElement>('header details.data-menu')) {
+      if (other !== menu) other.open = false;
     }
   });
 }
@@ -122,12 +129,6 @@ setInterval(() => {
 
 void loadFolders()
   .then(async () => {
-    const last = await loadLastFolder();
-    if (last && state.folders.some((folder) => folder.name === last)) {
-      const sortSelect = sortFolderSelect();
-      if (sortSelect) sortSelect.value = last;
-      renderFolderRack();
-    }
     await updateUnbookmarkFailures();
     return loadNextPost();
   })

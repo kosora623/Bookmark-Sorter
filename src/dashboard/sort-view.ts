@@ -1,22 +1,24 @@
-// 選別画面: 未整理のポストを 1 件ずつ出し、残す・破棄・スキップ・取り消しを扱う
+// 選別画面: 未整理のポストを 1 件ずつ出し、フォルダへの保存・削除・スキップ・取り消しを扱う
 import type { BookmarkPost } from '../db';
 import type { BookmarkChanges } from '../messages';
 import { logUnexpected } from '../runtime';
 import { isHttpUrl } from '../urls';
-import { openTweet, saveLastFolder, sendMessage, sendQuietly } from './api';
+import { openTweet, sendMessage, sendQuietly } from './api';
 import { clonePost, fillAuthor, fillTextWithLinks, renderLinkPreview } from './dom';
 import {
   adjustFolderCount,
   bindFolderRack,
   flashFolderSlot,
-  renderFolderRack,
-  selectFolderByShortcut,
-  selectedSortFolder
+  folderByShortcut,
+  renderFolderRack
 } from './folders';
 import { runExclusive, state } from './state';
 
 const MAX_UNDO = 30;
-const DISCARD_CONFIRM_MS = 2000;
+/** 削除してから Twitter 側の解除が始まるまで（background.ts の UNBOOKMARK_DELAY_MS と合わせる） */
+const UNBOOKMARK_GRACE_MS = 5000;
+/** 画面下の「保存しました・取り消す」を出しておく時間 */
+const LAST_ACTION_VISIBLE_MS = 4000;
 const PREFETCH_SIZE = 8;
 
 type UndoEntry =
@@ -31,8 +33,7 @@ const undoStack: UndoEntry[] = [];
 // 次に出すポストの先読み
 const postQueue: BookmarkPost[] = [];
 let refillPromise: Promise<void> | null = null;
-let discardArmedId: string | null = null;
-let discardArmTimer: ReturnType<typeof setTimeout> | null = null;
+let countdownTimer: ReturnType<typeof setTimeout> | null = null;
 // この画面を開いてから整理した件数（取り消すと減る）
 const session: Record<ActionType, number> = { kept: 0, discarded: 0, skipped: 0 };
 
@@ -45,7 +46,6 @@ export function resetSortState(): void {
   session.kept = 0;
   session.discarded = 0;
   session.skipped = 0;
-  clearDiscardArm();
   setLastAction('');
 }
 
@@ -53,7 +53,7 @@ function pushUndo(entry: UndoEntry): void {
   undoStack.push(entry);
   if (undoStack.length > MAX_UNDO) undoStack.shift();
   session[entry.type]++;
-  setLastAction(describeAction(entry));
+  setLastAction(describeAction(entry), entry.type === 'discarded');
 }
 
 function describeAction(entry: UndoEntry): string {
@@ -63,16 +63,39 @@ function describeAction(entry: UndoEntry): string {
     case 'discarded':
       return '削除しました';
     case 'skipped':
-      return 'スキップしました。あとでもう一度出ます';
+      return 'スキップしました（あとでもう一度出ます）';
   }
 }
 
-/** 直前の操作と、取り消しボタンを出す */
-function setLastAction(message: string): void {
+/** 直前の操作と取り消しボタンを画面下に出す。しばらくすると消える（Z での取り消しはその後もできる） */
+function setLastAction(message: string, countdown = false): void {
   const last = document.getElementById('last-action');
   const undoBtn = document.getElementById('btn-undo');
   if (last) last.innerText = message;
   if (undoBtn) undoBtn.hidden = undoStack.length === 0;
+
+  const area = last?.parentElement;
+  if (countdownTimer) {
+    clearTimeout(countdownTimer);
+    countdownTimer = null;
+  }
+  if (!area) return;
+  area.toggleAttribute('data-empty', message === '');
+  area.classList.remove('counting');
+  if (message === '') return;
+
+  if (!countdown) {
+    countdownTimer = setTimeout(() => setLastAction(''), LAST_ACTION_VISIBLE_MS);
+    return;
+  }
+  void area.offsetWidth; // 続けて削除したときもバーを最初からやり直す
+  area.style.setProperty('--undo-ms', `${UNBOOKMARK_GRACE_MS}ms`);
+  area.classList.add('counting');
+  countdownTimer = setTimeout(() => {
+    area.classList.remove('counting');
+    if (last) last.innerText = '削除しました（Twitter の解除も始めました）';
+    countdownTimer = setTimeout(() => setLastAction(''), LAST_ACTION_VISIBLE_MS);
+  }, UNBOOKMARK_GRACE_MS);
 }
 
 function renderSessionSummary(remaining: number): void {
@@ -81,36 +104,6 @@ function renderSessionSummary(remaining: number): void {
   const done = session.kept + session.discarded;
   const total = done + remaining;
   fill.style.width = total > 0 ? `${(done / total) * 100}%` : '0%';
-}
-
-function setDiscardArmedUi(armed: boolean): void {
-  document.getElementById('tweet-card')?.classList.toggle('confirm-discard', armed);
-  document.getElementById('btn-discard')?.classList.toggle('armed', armed);
-  const label = document.getElementById('discard-label');
-  if (label) label.innerText = armed ? 'もう一度で削除' : '削除';
-}
-
-export function clearDiscardArm(): void {
-  discardArmedId = null;
-  if (discardArmTimer) {
-    clearTimeout(discardArmTimer);
-    discardArmTimer = null;
-  }
-  setDiscardArmedUi(false);
-}
-
-function armDiscard(): void {
-  if (!currentPost) return;
-  discardArmedId = currentPost.id;
-  setDiscardArmedUi(true);
-  if (discardArmTimer) clearTimeout(discardArmTimer);
-  discardArmTimer = setTimeout(() => {
-    if (discardArmedId === currentPost?.id) clearDiscardArm();
-  }, DISCARD_CONFIRM_MS);
-}
-
-function isDiscardArmed(): boolean {
-  return discardArmedId !== null && discardArmedId === currentPost?.id;
 }
 
 function scheduleUnbookmark(post: BookmarkPost): void {
@@ -180,7 +173,6 @@ export async function loadNextPost(): Promise<void> {
 
   if (!next) {
     currentPost = null;
-    clearDiscardArm();
     showEmptyState(true);
     const counts = await updateCount();
     renderEmptyMessage(counts.kept === 0 && session.kept + session.discarded === 0);
@@ -188,7 +180,6 @@ export async function loadNextPost(): Promise<void> {
   }
 
   currentPost = next;
-  clearDiscardArm();
   showEmptyState(false);
   renderCard(currentPost);
   void refillQueue().catch(logUnexpected);
@@ -296,12 +287,10 @@ async function updateCurrent(changes: BookmarkChanges): Promise<void> {
   });
 }
 
-async function keepCurrentPost(): Promise<void> {
+async function keepCurrentPost(folder: string): Promise<void> {
   if (!currentPost) return;
 
   skippedIds.delete(currentPost.id);
-  const folder = selectedSortFolder();
-  saveLastFolder(folder);
   await updateCurrent({ folder, status: 'kept' });
   pushUndo({ type: 'kept', post: clonePost(currentPost), folder });
   adjustFolderCount(folder, 1);
@@ -327,7 +316,6 @@ async function skipCurrentPost(): Promise<void> {
 
 function showPost(post: BookmarkPost): void {
   currentPost = post;
-  clearDiscardArm();
   showEmptyState(false);
   renderCard(post);
 }
@@ -367,29 +355,23 @@ async function undoLast(): Promise<void> {
   await updateCount();
 }
 
-function keepAndNext(): void {
-  clearDiscardArm();
+/** 指定のフォルダに保存して次へ */
+function keepAndNext(folder: string): void {
   void runExclusive(async () => {
-    await keepCurrentPost();
+    await keepCurrentPost(folder);
     await loadNextPost();
   });
 }
 
 function skipAndNext(): void {
-  clearDiscardArm();
   void runExclusive(async () => {
     await skipCurrentPost();
     await loadNextPost();
   });
 }
 
-/** 破棄は 2 回押しで確定する。1 回目は確認状態にするだけ */
-function discardOrArm(): void {
-  if (!isDiscardArmed()) {
-    armDiscard();
-    return;
-  }
-  clearDiscardArm();
+/** 削除は 1 回で確定する。Twitter 側の解除は少し待ってから始まるので、その間は Z で解除ごと取り消せる */
+function discardAndNext(): void {
   void runExclusive(async () => {
     await discardCurrentPost();
     await loadNextPost();
@@ -398,19 +380,12 @@ function discardOrArm(): void {
 
 /** 選別画面のボタン・キー操作を登録する */
 export function bindSortView(): void {
-  bindFolderRack();
-
-  document.getElementById('btn-undo')?.addEventListener('click', () => {
-    clearDiscardArm();
-    void runExclusive(undoLast);
+  bindFolderRack((folder) => {
+    if (currentPost && !state.isBusy) keepAndNext(folder);
   });
 
-  document.getElementById('folder-select')?.addEventListener('change', (e) => {
-    const target = e.target;
-    if (target instanceof HTMLSelectElement && target.value) {
-      saveLastFolder(target.value);
-      renderFolderRack();
-    }
+  document.getElementById('btn-undo')?.addEventListener('click', () => {
+    void runExclusive(undoLast);
   });
 
   document.getElementById('card-open-link')?.addEventListener('click', (e) => {
@@ -418,16 +393,12 @@ export function bindSortView(): void {
     if (currentPost?.url) openTweet(currentPost.url);
   });
 
-  document.getElementById('btn-keep')?.addEventListener('click', () => {
-    if (currentPost) keepAndNext();
-  });
-
   document.getElementById('btn-skip')?.addEventListener('click', () => {
     if (currentPost) skipAndNext();
   });
 
   document.getElementById('btn-discard')?.addEventListener('click', () => {
-    if (currentPost) discardOrArm();
+    if (currentPost) discardAndNext();
   });
 
   document.addEventListener('keydown', handleKeydown);
@@ -435,47 +406,30 @@ export function bindSortView(): void {
 
 function handleKeydown(e: KeyboardEvent): void {
   if (state.viewMode !== 'sort' || state.isBusy) return;
-  // 押しっぱなしのリピートで ← の2回押し確認をすり抜けないようにする。
+  // 押しっぱなしのリピートで何件も続けて振り分けないようにする。
   // 修飾キー付き（Ctrl+1 のタブ切替など）はブラウザに任せる。
   if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
 
+  // フォルダ名の入力中などは、文字入力を優先する
   const activeEl = document.activeElement;
-  const isInputActive = activeEl instanceof HTMLInputElement || activeEl instanceof HTMLSelectElement;
-
-  if (isInputActive) {
-    if (activeEl instanceof HTMLElement && activeEl.closest('.add-folder-form')) {
-      return;
-    }
-    if (e.key === 'Enter' && currentPost) {
-      e.preventDefault();
-      keepAndNext();
-    }
-    return;
-  }
-
-  if (e.key === 'Escape') {
-    if (isDiscardArmed()) {
-      e.preventDefault();
-      clearDiscardArm();
-    }
-    return;
-  }
+  if (activeEl instanceof HTMLInputElement || activeEl instanceof HTMLSelectElement) return;
 
   if (e.key === 'z' || e.key === 'Z') {
     e.preventDefault();
-    clearDiscardArm();
     void runExclusive(undoLast);
     return;
   }
 
+  if (!currentPost) return;
+
   if (e.key >= '1' && e.key <= '9') {
-    e.preventDefault();
-    clearDiscardArm();
-    selectFolderByShortcut(Number(e.key) - 1);
+    const folder = folderByShortcut(Number(e.key) - 1);
+    if (folder) {
+      e.preventDefault();
+      keepAndNext(folder);
+    }
     return;
   }
-
-  if (!currentPost) return;
 
   if (e.key === 'o' || e.key === 'O') {
     e.preventDefault();
@@ -483,12 +437,9 @@ function handleKeydown(e: KeyboardEvent): void {
     return;
   }
 
-  if (e.key === 'ArrowRight') {
+  if (e.key === 'ArrowLeft') {
     e.preventDefault();
-    keepAndNext();
-  } else if (e.key === 'ArrowLeft') {
-    e.preventDefault();
-    discardOrArm();
+    discardAndNext();
   } else if (e.key === 'ArrowDown') {
     e.preventDefault();
     skipAndNext();
