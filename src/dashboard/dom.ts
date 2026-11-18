@@ -145,7 +145,7 @@ function svgEl(tag: string, attrs: Record<string, string>): SVGElement {
   return el;
 }
 
-export function createIcon(kind: 'trash' | 'open'): SVGSVGElement {
+export function createIcon(kind: 'trash' | 'open' | 'edit'): SVGSVGElement {
   const svg = svgEl('svg', {
     viewBox: '0 0 24 24',
     fill: 'none',
@@ -164,6 +164,11 @@ export function createIcon(kind: 'trash' | 'open'): SVGSVGElement {
       svgEl('path', { d: 'M14 11v6' }),
       svgEl('path', { d: 'M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12' }),
       svgEl('path', { d: 'M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2' })
+    );
+  } else if (kind === 'edit') {
+    svg.append(
+      svgEl('path', { d: 'M12 20h9' }),
+      svgEl('path', { d: 'M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z' })
     );
   } else {
     svg.append(

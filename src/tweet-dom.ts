@@ -60,17 +60,32 @@ export function queryOwnAll<T extends Element>(root: HTMLElement, selector: stri
   return [...root.querySelectorAll<T>(selector)].filter((el) => isOwnDescendant(el, root));
 }
 
-/** ポスト単体ページで、引用などではない本体のポストを返す */
-export function findPrimaryTweet(root: ParentNode = document): HTMLElement | null {
-  const tweets = root.querySelectorAll<HTMLElement>('article[data-testid="tweet"]');
-  for (const tweet of tweets) {
-    if (!isNestedTweet(tweet)) return tweet;
-  }
-  return tweets[0] ?? null;
+/** ポストの日時リンク（本人のポストへのリンク）から status ID を読む */
+function ownStatusId(tweet: HTMLElement): string | undefined {
+  const link = queryOwn(tweet, 'time')?.closest('a');
+  return link?.getAttribute('href')?.match(/\/status\/(\d+)/)?.[1];
 }
 
-export function findRemoveBookmarkButton(root: ParentNode): HTMLElement | null {
-  return root.querySelector<HTMLElement>('[data-testid="removeBookmark"]');
+/**
+ * ポスト単体ページで、引用などではない本体のポストを返す。
+ * 返信のページでは返信先のポストが上に並ぶので、statusId があればそれと一致するものを選ぶ。
+ * 本体のポストは日時がリンクにならないことがあるので、一致するものが無ければ、
+ * 別のポストへの日時リンクを持たない最初のポストにする。
+ */
+export function findPrimaryTweet(statusId?: string, root: ParentNode = document): HTMLElement | null {
+  const tweets = [...root.querySelectorAll<HTMLElement>('article[data-testid="tweet"]')].filter(
+    (tweet) => !isNestedTweet(tweet)
+  );
+  if (!statusId) return tweets[0] ?? null;
+
+  const exact = tweets.find((tweet) => ownStatusId(tweet) === statusId);
+  if (exact) return exact;
+  return tweets.find((tweet) => ownStatusId(tweet) === undefined) ?? null;
+}
+
+/** root 自身の「ブックマーク解除」ボタン（引用ポストの中のものは除く） */
+export function findRemoveBookmarkButton(root: HTMLElement): HTMLElement | null {
+  return queryOwn<HTMLElement>(root, '[data-testid="removeBookmark"]');
 }
 
 function hostnameOf(url: string): string | undefined {

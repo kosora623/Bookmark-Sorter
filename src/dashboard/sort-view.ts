@@ -10,6 +10,7 @@ import {
   bindFolderRack,
   flashFolderSlot,
   folderByShortcut,
+  loadFolders,
   renderFolderRack
 } from './folders';
 import { runExclusive, state } from './state';
@@ -268,7 +269,8 @@ function renderCard(post: BookmarkPost): void {
   }
 }
 
-async function updateCount(): Promise<{ unprocessed: number; kept: number }> {
+/** 未整理・保存済みの件数を取り直して表示する */
+export async function updateCount(): Promise<{ unprocessed: number; kept: number }> {
   const counts = await sendMessage({ action: 'get_counts' });
   const remainingEl = document.getElementById('remaining-count');
   const keptEl = document.getElementById('kept-count');
@@ -345,8 +347,8 @@ async function undoLast(): Promise<void> {
       }
     });
     if (entry.type === 'kept') {
-      adjustFolderCount(entry.folder, -1);
-      renderFolderRack();
+      // 保存済み画面で移動・名前変更・削除されていることがあるので、件数は取り直す
+      await loadFolders();
     }
   }
 

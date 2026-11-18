@@ -24,6 +24,8 @@ export interface BookmarkPost {
 
 export interface FolderRecord {
   name: string;
+  /** 並び順（小さいほど上）。古いデータには無い */
+  order?: number;
 }
 
 export class BookmarkDatabase extends Dexie {

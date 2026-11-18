@@ -7,7 +7,6 @@ import {
   parseVisibleTweets,
   queryOwn
 } from './tweet-dom';
-import { PENDING_UNBOOKMARK_KEY, type PendingUnbookmark } from './urls';
 
 const INSTANCE_ID = Math.random().toString(36).slice(2);
 const BATCH_LIMIT = 100;
@@ -28,6 +27,8 @@ let lastScrollY = -1;            // スクロール位置の記憶用
 let sameScrollCount = 0;         // スクロールしても画面が動かなかった回数
 let overlayCreated = false;
 let unbookmarkAttempted = false;
+/** 解除の問い合わせをしたパス。同じページで何度も background を起こさないようにする */
+let unbookmarkAskedPath = '';
 let tornDown = false;
 let pageCheckTimer: ReturnType<typeof setInterval> | null = null;
 let titleObserver: MutationObserver | null = null;
@@ -89,23 +90,23 @@ function statusIdFromLocation(): string | undefined {
   return location.pathname.match(/\/status\/(\d+)/)?.[1];
 }
 
-async function isPendingUnbookmark(): Promise<boolean> {
-  const statusId = statusIdFromLocation();
-  if (!statusId || !isExtensionAlive()) return false;
-
+/**
+ * このタブが background の開いた解除用の裏タブか。
+ * chrome.storage.session は既定で content script から読めないので、background に問い合わせる。
+ */
+async function isPendingUnbookmark(statusId: string): Promise<boolean> {
   try {
-    const stored = await chrome.storage.session.get(PENDING_UNBOOKMARK_KEY);
-    const pending = stored[PENDING_UNBOOKMARK_KEY] as Partial<PendingUnbookmark> | undefined;
-    return pending?.statusId === statusId;
+    const response = await sendRuntimeMessage({ action: 'get_unbookmark_task', statusId });
+    return response?.pending === true;
   } catch {
     return false;
   }
 }
 
-async function waitForBookmarkCleared(deadline: number): Promise<boolean> {
+async function waitForBookmarkCleared(statusId: string, deadline: number): Promise<boolean> {
   while (Date.now() < deadline) {
     if (!isExtensionAlive()) return false;
-    const tweetEl = findPrimaryTweet();
+    const tweetEl = findPrimaryTweet(statusId);
     // ボタンが「ブックマークに追加」へ切り替われば、X 側の解除リクエストが通っている
     if (tweetEl && !findRemoveBookmarkButton(tweetEl) && queryOwn(tweetEl, '[data-testid="bookmark"]')) {
       return true;
@@ -117,7 +118,10 @@ async function waitForBookmarkCleared(deadline: number): Promise<boolean> {
 
 async function tryAutoUnbookmark(): Promise<void> {
   if (unbookmarkAttempted) return;
-  if (!(await isPendingUnbookmark())) return;
+  const statusId = statusIdFromLocation();
+  if (!statusId || unbookmarkAskedPath === location.pathname) return;
+  unbookmarkAskedPath = location.pathname;
+  if (!(await isPendingUnbookmark(statusId))) return;
   unbookmarkAttempted = true;
 
   let ok = false;
@@ -127,12 +131,12 @@ async function tryAutoUnbookmark(): Promise<void> {
       teardown();
       return;
     }
-    const tweetEl = findPrimaryTweet();
+    const tweetEl = findPrimaryTweet(statusId);
     if (tweetEl) {
       const removeBtn = findRemoveBookmarkButton(tweetEl);
       if (removeBtn) {
         removeBtn.click();
-        ok = await waitForBookmarkCleared(Date.now() + UNBOOKMARK_CONFIRM_TIMEOUT_MS);
+        ok = await waitForBookmarkCleared(statusId, Date.now() + UNBOOKMARK_CONFIRM_TIMEOUT_MS);
         break;
       }
       if (queryOwn(tweetEl, '[data-testid="bookmark"]')) {

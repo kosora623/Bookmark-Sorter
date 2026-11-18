@@ -1,10 +1,4 @@
-export const PENDING_UNBOOKMARK_KEY = 'pendingUnbookmark';
 export const UNBOOKMARK_INFLIGHT_KEY = 'unbookmarkInflight';
-
-export interface PendingUnbookmark {
-  statusId: string;
-  url: string;
-}
 
 export interface InflightUnbookmark {
   url: string;

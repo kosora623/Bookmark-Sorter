@@ -26,6 +26,7 @@ export type ExtensionRequest =
   | { action: 'unbookmark'; tweetUrl: string }
   | { action: 'cancel_unbookmark'; tweetUrl: string }
   | { action: 'unbookmark_done'; ok?: boolean }
+  | { action: 'get_unbookmark_task'; statusId: string }
   | { action: 'list_unbookmark_failures' }
   | { action: 'retry_unbookmark_failures' }
   | { action: 'export_data' }
@@ -37,6 +38,11 @@ export type ExtensionRequest =
   | { action: 'list_folders' }
   | { action: 'add_folder'; name: string }
   | { action: 'delete_folder'; name: string }
+  | { action: 'rename_folder'; name: string; newName: string }
+  | { action: 'reorder_folders'; names: string[] }
+  | { action: 'discard_bookmarks'; ids: string[] }
+  | { action: 'restore_bookmarks'; ids: string[] }
+  | { action: 'move_bookmarks'; ids: string[]; folder: string }
   | { action: 'clear_bookmarks' }
   | { action: 'open_dashboard' };
 
@@ -55,6 +61,7 @@ export interface ExtensionResponses {
   unbookmark: { ok: true };
   cancel_unbookmark: { ok: true };
   unbookmark_done: { ok: true };
+  get_unbookmark_task: { pending: boolean };
   list_unbookmark_failures: { failures: UnbookmarkFailure[] };
   retry_unbookmark_failures: { queued: number };
   export_data: ExportData;
@@ -66,6 +73,12 @@ export interface ExtensionResponses {
   list_folders: { folders: FolderInfo[] };
   add_folder: FolderMutationResult;
   delete_folder: FolderMutationResult;
+  rename_folder: FolderMutationResult;
+  reorder_folders: FolderMutationResult;
+  discard_bookmarks: { discarded: number; folders: FolderInfo[] };
+  /** unbookmarked: すでに Twitter 側の解除が始まっていて、Twitter では戻せなかった件数 */
+  restore_bookmarks: { restored: number; unbookmarked: number; folders: FolderInfo[] };
+  move_bookmarks: { ok: boolean; moved: number; folders: FolderInfo[] };
   clear_bookmarks: { ok: true };
   open_dashboard: { ok: true };
 }
@@ -84,6 +97,7 @@ const ACTIONS: Record<ExtensionAction, true> = {
   unbookmark: true,
   cancel_unbookmark: true,
   unbookmark_done: true,
+  get_unbookmark_task: true,
   list_unbookmark_failures: true,
   retry_unbookmark_failures: true,
   export_data: true,
@@ -95,6 +109,11 @@ const ACTIONS: Record<ExtensionAction, true> = {
   list_folders: true,
   add_folder: true,
   delete_folder: true,
+  rename_folder: true,
+  reorder_folders: true,
+  discard_bookmarks: true,
+  restore_bookmarks: true,
+  move_bookmarks: true,
   clear_bookmarks: true,
   open_dashboard: true
 };
