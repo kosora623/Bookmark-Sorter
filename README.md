@@ -67,19 +67,20 @@
 
 - ブックマークページからのバッチ収集（100件単位）
 - 未整理 1 件ずつのキーボード選別（次件の先読み）
-- フォルダ付け（数字キー、前回フォルダの記憶）
+- フォルダ付け（数字キーかクリックで、そのフォルダに保存して次へ）
 - 画像プレビュー（大きいサイズの URL を参照。ファイルは持たない）、動画ありの表示
 - 保存済み一覧（フォルダフィルタ）
 - 元ポストをブラウザタブで開く
 - 保存 / 削除 / スキップの Undo
 - JSON でのエクスポート / インポート
+- 表示テーマの切り替え（自動・ライト・ダークブルー・ブラック）
 - Twitter 本体のブックマーク解除（裏タブを **1 件ずつ** 直列処理。キューは永続化）
 
 ## 権限
 
 | 権限 | 理由 |
 |---|---|
-| `storage` / `unlimitedStorage` | フォルダの記憶と、大量ブックマークの IndexedDB |
+| `storage` / `unlimitedStorage` | 解除キュー・解除失敗の記録の保存と、大量ブックマークの IndexedDB |
 | `host_permissions`（x.com / twitter.com） | ブックマークページでの収集と、解除時のボタン操作 |
 
 Twitter は SPA のため、ブックマークへ遷移しても content script が残るよう `https://x.com/*` にマッチさせています。オーバーレイが出るのはブックマークページだけです。
@@ -124,7 +125,12 @@ x.com / i/history     dashboard (index.html)
 | ファイル | 役割 |
 |---|---|
 | `src/content.ts` | 収集オーバーレイ、DOM からポスト解析、解除クリック |
-| `src/dashboard.ts` | 選別 UI、保存済み一覧、Undo、キー操作 |
+| `src/dashboard.ts` | ダッシュボードの入口（タブ切り替え、ヘッダーのメニュー、初期化） |
+| `src/dashboard/sort-view.ts` | 選別画面（1 件ずつの表示、保存・削除・スキップ、Undo、キー操作） |
+| `src/dashboard/folders.ts` | フォルダ一覧と、選別画面の棚 |
+| `src/dashboard/kept-view.ts` | 保存済み一覧（フォルダ絞り込み・検索・移動）と、フォルダの追加・削除 |
+| `src/dashboard/theme.ts` | 表示テーマの切り替えと保存 |
+| `src/dashboard/` のその他 | background との通信、データメニュー、トースト・確認ダイアログなど |
 | `src/background.ts` | DB の読み書き、解除キュー、ダッシュボード起動 |
 | `src/db.ts` | `BookmarkPost` 型と Dexie スキーマ |
 | `src/messages.ts` | content / dashboard / background のメッセージ型 |
@@ -135,6 +141,7 @@ x.com / i/history     dashboard (index.html)
 | `src/constants.ts` | 既定フォルダ名 |
 | `public/manifest.json` | MV3 マニフェスト（`version` はビルド時に `package.json` から入る） |
 | `public/content-loader.js` | content script から `assets/content.js` を動的 import |
+| `public/theme-init.js` | ダッシュボードの描画前に、選んだテーマを当てる |
 | `index.html` | ダッシュボード |
 
 ビルドは Vite のマルチページ構成（`vite.config.ts`）です。出力は `dist/`。
