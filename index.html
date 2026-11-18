@@ -4,48 +4,81 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Bookmark Sorter</title>
+  <!-- 選んだテーマを描画前に当てる（拡張機能のページはインラインの script を使えないのでファイルで読む） -->
+  <script src="/theme-init.js"></script>
   <style>
     /*
      * 「仕分け棚」: 郵便の仕分け棚のように、番号つきの棚（フォルダ）へ 1 件ずつ振り分ける画面。
-     * 色は鋼板のグレーグリーンを地に、墨色の文字、保存は深緑・削除は朱。
-     * 数字（残り件数・棚番号）は字幅の狭い Bahnschrift / DIN で読ませる。
+     * 色は Twitter(X) の画面に合わせる。保存は青、削除は赤。
+     * 書体はシステムフォント、ボタンは丸く、カードは角丸 16px（X の画面に合わせる）。
+     *
+     * テーマは「表示」メニューで選ぶ（src/dashboard/theme.ts）。選んだテーマは <html data-theme> に入る。
+     * data-theme が無い「自動」のときは、端末がダークモードならダークブルーにする。
      */
     :root {
-      --bg: #e3e7e3;
-      --surface: #f8f9f7;
-      --slot: #d3dad5;
-      --slot-hover: #c8d0ca;
-      --ink: #1d2a2e;
-      --ink-2: #4f5e63;
-      --line: #c3cbc6;
-      --save: #0e6b57;
-      --save-hover: #0b5949;
-      --cut: #b4261c;
-      --cut-soft: #f6e1de;
-      --on-strong: #f8f9f7;
-      --focus: #2a6fdb;
-      --font-ui: "BIZ UDPGothic", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Noto Sans CJK JP", "Yu Gothic UI", Meiryo, sans-serif;
-      --font-num: "Bahnschrift", "DIN Alternate", "DIN Next", "Inter", var(--font-ui);
+      --bg: #ffffff;
+      --surface: #ffffff;
+      --slot: #eff3f4;
+      --slot-hover: #e1e8ed;
+      --ink: #0f1419;
+      --ink-2: #536471;
+      --line: #cfd9de;
+      --save: #1d9bf0;
+      --save-hover: #1a8cd8;
+      --cut: #f4212e;
+      --cut-soft: #fee8ea;
+      --on-strong: #ffffff;
+      --focus: #1d9bf0;
+      /* Twitter(X) と同じくシステムフォント。和文はヒラギノ / 游ゴシック / メイリオに落ちる */
+      --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic UI", Meiryo, sans-serif;
+      --font-num: var(--font-ui);
       color-scheme: light;
     }
 
+    /* ダークブルー: 紺がかった灰色の地。黒地より区画や線が見分けやすく、目も疲れにくい */
+    :root[data-theme="dim"] {
+      --bg: #15202b;
+      --surface: #15202b;
+      --slot: #1e2732;
+      --slot-hover: #273340;
+      --ink: #f7f9f9;
+      --ink-2: #8b98a5;
+      --line: #38444d;
+      --cut-soft: #2d1f2a;
+      --on-strong: #15202b;
+      color-scheme: dark;
+    }
+
     @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #161c1e;
-        --surface: #1f272a;
-        --slot: #2a3437;
-        --slot-hover: #33403f;
-        --ink: #e4eae7;
-        --ink-2: #9aa9ab;
-        --line: #364241;
-        --save: #187a62;
-        --save-hover: #1d8c70;
-        --cut: #ff8d7f;
-        --cut-soft: #3a2220;
-        --on-strong: #161c1e;
-        --focus: #7fb0ff;
+      :root:not([data-theme]) {
+        --bg: #15202b;
+        --surface: #15202b;
+        --slot: #1e2732;
+        --slot-hover: #273340;
+        --ink: #f7f9f9;
+        --ink-2: #8b98a5;
+        --line: #38444d;
+        --cut-soft: #2d1f2a;
+        --on-strong: #15202b;
         color-scheme: dark;
       }
+    }
+
+    /*
+     * ブラック: 真っ黒の地。X の配色そのままだと区画・線・補足の文字が黒に沈むので、
+     * それぞれ一段明るくして見分けられるようにしている（補足の文字は黒地で 6:1 ほど）。
+     */
+    :root[data-theme="black"] {
+      --bg: #000000;
+      --surface: #000000;
+      --slot: #202327;
+      --slot-hover: #2a2e33;
+      --ink: #e7e9ea;
+      --ink-2: #8b9096;
+      --line: #3e4144;
+      --cut-soft: #2a0d10;
+      --on-strong: #000000;
+      color-scheme: dark;
     }
 
     * { box-sizing: border-box; }
@@ -81,12 +114,11 @@
     }
 
     #app {
-      max-width: 880px;
       margin: 0 auto;
       padding: 20px 24px 48px;
     }
 
-    #app:has(#kept-view:not([hidden])) { max-width: 1040px; }
+    #app { max-width: 1040px; }
 
     /* ---------- ヘッダー ---------- */
 
@@ -99,21 +131,20 @@
 
     h1 {
       margin: 0;
-      font: 600 17px var(--font-num);
-      letter-spacing: 0.01em;
+      font: 800 19px var(--font-ui);
     }
 
     .view-tabs {
       display: flex;
       padding: 3px;
-      border-radius: 8px;
+      border-radius: 9999px;
       background: var(--slot);
     }
 
     .tab-btn {
       padding: 6px 16px;
       border: 0;
-      border-radius: 6px;
+      border-radius: 9999px;
       background: none;
       color: var(--ink-2);
       font-weight: 700;
@@ -143,7 +174,7 @@
     .warn-btn {
       padding: 6px 12px;
       border: 1px solid var(--cut);
-      border-radius: 8px;
+      border-radius: 9999px;
       background: var(--cut-soft);
       color: var(--cut);
       font-size: 13px;
@@ -159,7 +190,7 @@
       gap: 6px;
       padding: 6px 12px;
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: 9999px;
       color: var(--ink-2);
       font-size: 14px;
       cursor: pointer;
@@ -179,9 +210,9 @@
       width: 260px;
       padding: 6px;
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: 12px;
       background: var(--surface);
-      box-shadow: 0 10px 24px rgba(20, 30, 32, 0.18);
+      box-shadow: 0 10px 24px rgba(15, 20, 25, 0.15);
     }
 
     .menu-item {
@@ -189,7 +220,7 @@
       width: 100%;
       padding: 8px 10px;
       border: 0;
-      border-radius: 6px;
+      border-radius: 8px;
       background: none;
       text-align: left;
     }
@@ -204,6 +235,72 @@
     .menu-item:hover { background: var(--slot); }
     .menu-item.danger { color: var(--cut); }
     .menu-item.danger:hover { background: var(--cut-soft); }
+
+    /* 表示メニュー: テーマを見本つきのラジオボタンで選ぶ */
+    .theme-panel {
+      margin: 0;
+      min-width: 0;
+    }
+
+    .theme-legend {
+      float: left;
+      width: 100%;
+      padding: 4px 10px 6px;
+      color: var(--ink-2);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .theme-option {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      clear: both;
+      min-height: 44px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .theme-option:hover { background: var(--slot); }
+    .theme-option:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+    .theme-option input {
+      flex-shrink: 0;
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      accent-color: var(--save);
+    }
+
+    .theme-option small {
+      display: block;
+      color: var(--ink-2);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .theme-option:has(input:checked) { font-weight: 700; }
+    .theme-option:has(input:checked) small { font-weight: 400; }
+
+    /* 見本は、そのテーマの地色と文字色で「Aa」を出す */
+    .theme-swatch {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      width: 36px;
+      height: 28px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .swatch-light { background: #ffffff; color: #0f1419; }
+    .swatch-dim { background: #15202b; color: #f7f9f9; }
+    .swatch-black { background: #000000; color: #e7e9ea; }
+    .swatch-auto { background: linear-gradient(135deg, #ffffff 50%, #15202b 50%); color: transparent; }
 
     .menu-sep {
       height: 1px;
@@ -222,7 +319,7 @@
       display: block;
       width: 0;
       height: 100%;
-      background: var(--ink);
+      background: var(--save);
       transition: width 0.25s ease;
     }
 
@@ -233,7 +330,7 @@
     .card {
       position: relative;
       padding: 22px 26px 24px;
-      border-radius: 4px;
+      border-radius: 16px;
       background: var(--surface);
       box-shadow: 0 0 0 1px var(--line);
     }
@@ -244,8 +341,6 @@
       from { opacity: 0; transform: translateY(6px); }
       to { opacity: 1; transform: none; }
     }
-
-    .card.confirm-discard { box-shadow: 0 0 0 2px var(--cut); }
 
     .card-head {
       display: flex;
@@ -277,7 +372,7 @@
       width: 30px;
       height: 30px;
       margin: -4px -8px 0 0;
-      border-radius: 6px;
+      border-radius: 50%;
       color: var(--ink-2);
       font-size: 13px;
       text-decoration: none;
@@ -320,7 +415,7 @@
       width: 100%;
       height: 100%;
       max-height: 300px;
-      border-radius: 4px;
+      border-radius: 16px;
       background: var(--slot);
       object-fit: contain;
     }
@@ -339,7 +434,7 @@
       gap: 6px;
       margin: 12px 0 0;
       padding: 4px 10px;
-      border-radius: 6px;
+      border-radius: 9999px;
       background: var(--slot);
       color: var(--ink-2);
       font-size: 13px;
@@ -354,7 +449,7 @@
       overflow: hidden;
       max-width: 36em;
       border: 1px solid var(--line);
-      border-radius: 4px;
+      border-radius: 16px;
       color: inherit;
       text-decoration: none;
     }
@@ -419,54 +514,63 @@
 
     .empty-sub a { color: inherit; text-underline-offset: 3px; }
 
-    /* ---------- 選別: 保存先の棚 ---------- */
+    /* ---------- 選別: 棚 ---------- */
 
-    /* 長いポストでも保存先と操作ボタンが画面内に残るよう、下に貼りつける */
+    /*
+     * ポストは左、棚は右に立てて置く。ポストの長さが変わっても棚の位置は動かない。
+     * 棚の区画は鋼板の地色で塗り、番号は DIN の数字だけで見せる（枠で囲まない）。
+     */
+    .sort-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 248px;
+      gap: 0 16px;
+      align-items: start;
+    }
+
     .dock {
       position: sticky;
-      bottom: 0;
-      z-index: 5;
-      margin-top: 8px;
-      padding: 14px 0 8px;
-      background: var(--bg);
+      top: 16px;
+      max-height: calc(100vh - 32px);
+      overflow-y: auto;
+      /* 棚の光る枠やフォーカス枠が切れないよう、はみ出す分の余白を持つ */
+      margin: -4px;
+      padding: 4px;
     }
-
-    .after-actions:has(#btn-undo[hidden]):has(.last-action:empty) { display: none; }
-    #sort-actions + .after-actions { margin-top: 8px; }
-
 
     .rack {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(156px, 1fr));
-      gap: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
     }
 
-    /* 棚は 1 行: 番号・名前・件数。選んでいる棚だけ塗る */
+    /* 区画は 1 行: 番号・名前・件数。押すとそこに入れて次へ */
     .slot {
       display: flex;
-      align-items: baseline;
-      gap: 8px;
+      align-items: center;
+      gap: 12px;
       min-width: 0;
-      height: 40px;
-      padding: 0 12px;
-      border: 1px solid var(--line);
-      border-radius: 4px;
-      background: transparent;
+      height: 42px;
+      padding: 0 16px 0 14px;
+      border: 0;
+      border-radius: 9999px;
+      background: var(--slot);
       text-align: left;
     }
 
-    .slot:hover { background: var(--slot); }
+    .slot:hover { background: var(--slot-hover); }
+    .slot:active { background: var(--ink); color: var(--on-strong); }
 
     .slot-key {
-      align-self: center;
-      font: 600 16px/1 var(--font-num);
+      flex-shrink: 0;
+      width: 1.1em;
+      font: 700 15px/1 var(--font-num);
       color: var(--ink-2);
+      text-align: center;
     }
 
     .slot-key.none { font-size: 13px; }
 
     .slot-name {
-      align-self: center;
       flex: 1;
       min-width: 0;
       overflow: hidden;
@@ -477,38 +581,27 @@
     }
 
     .slot-count {
-      align-self: center;
       color: var(--ink-2);
-      font: 12px var(--font-num);
+      font: 13px var(--font-num);
       font-variant-numeric: tabular-nums;
-      opacity: 0.8;
     }
-
-    .slot[aria-pressed="true"] {
-      border-color: var(--ink);
-      background: var(--ink);
-      color: var(--on-strong);
-    }
-
-    .slot[aria-pressed="true"] .slot-key,
-    .slot[aria-pressed="true"] .slot-count { color: inherit; opacity: 0.75; }
 
     .rack .add-folder-form {
-      height: 40px;
+      height: 42px;
+      margin-top: 4px;
       padding: 0 4px 0 6px;
       border: 1px dashed var(--line);
-      border-radius: 4px;
+      border-radius: 9999px;
     }
 
     .rack .add-folder-form:not(:focus-within) button { display: none; }
 
-    /* 保存した棚の件数が増えたことを一瞬だけ知らせる */
+    /* 入れた区画の件数が増えたことを一瞬だけ知らせる */
     .slot.received { animation: slot-received 0.45s ease-out; }
 
     @keyframes slot-received {
-      0% { box-shadow: 0 0 0 0 var(--save); }
-      30% { box-shadow: 0 0 0 3px var(--save); }
-      100% { box-shadow: 0 0 0 0 transparent; }
+      0% { background: var(--save); color: #fff; }
+      100% { background: var(--slot); }
     }
 
     .add-folder-form {
@@ -522,7 +615,7 @@
       min-width: 0;
       padding: 6px 8px;
       border: 1px solid transparent;
-      border-radius: 4px;
+      border-radius: 9999px;
       background: transparent;
       font-size: 13px;
     }
@@ -533,7 +626,7 @@
       flex-shrink: 0;
       padding: 5px 9px;
       border: 1px solid var(--line);
-      border-radius: 4px;
+      border-radius: 9999px;
       background: var(--surface);
       font-size: 12px;
       font-weight: 700;
@@ -541,74 +634,35 @@
 
     ::placeholder { color: var(--ink-2); opacity: 1; }
 
-    /* ---------- 選別: 操作ボタン ---------- */
+    /* ---------- 選別: スキップ・削除 ---------- */
 
+    /* 棚の下に、区画と同じ形で並べる。棚とは線で区切る */
     .actions {
       display: grid;
-      grid-template-columns: 1fr 1fr 2fr;
-      gap: 8px;
-      margin-top: 16px;
+      grid-template-columns: 1fr 1fr;
+      gap: 2px;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
     }
 
     .action-btn {
-      position: relative;
-      display: inline-flex;
+      display: flex;
       align-items: center;
-      justify-content: center;
       gap: 10px;
-      min-height: 54px;
-      padding: 10px 12px;
-      overflow: hidden;
+      height: 42px;
+      padding: 0 10px;
       border: 1px solid var(--line);
-      border-radius: 6px;
-      background: var(--surface);
-      font-size: 16px;
+      border-radius: 9999px;
+      background: none;
+      font-size: 14px;
       font-weight: 700;
     }
 
-    .action-btn:hover { background: var(--bg); }
-
+    .action-btn:hover { background: var(--slot); }
     .action-btn.discard { color: var(--cut); }
-
-    .action-btn.discard.armed {
-      border-color: var(--cut);
-      background: var(--cut);
-      color: var(--surface);
-    }
-
-    /* 2 秒の確認時間が減っていくのを見せる */
-    .action-btn.discard.armed::after {
-      content: "";
-      position: absolute;
-      left: 0;
-      bottom: 0;
-      height: 3px;
-      width: 100%;
-      background: var(--surface);
-      opacity: 0.6;
-      transform-origin: left;
-      animation: arm-countdown 2s linear forwards;
-    }
-
-    @keyframes arm-countdown {
-      from { transform: scaleX(1); }
-      to { transform: scaleX(0); }
-    }
-
-    .action-btn.keep {
-      border-color: var(--save);
-      background: var(--save);
-      color: #fff;
-    }
-
-    .action-btn.keep:hover { background: var(--save-hover); }
-
-    .keep-label {
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
+    .action-btn.discard .slot-key { color: inherit; }
+    .action-btn.discard:hover { background: var(--cut-soft); }
 
     kbd {
       display: inline-flex;
@@ -622,17 +676,50 @@
       opacity: 0.75;
     }
 
+    /*
+     * 直前の操作と取り消し。ポストの上に 1 行ぶんの場所を取っておき、出入りでずれないようにする。
+     * 削除の直後は、Twitter 側の解除が始まるまでの残り時間を朱の細線で見せる。
+     */
     .after-actions {
+      position: relative;
+      grid-column: 1 / -1;
       display: flex;
-      flex-wrap: wrap;
       align-items: center;
-      gap: 8px 16px;
-      min-height: 32px;
+      gap: 14px;
+      height: 30px;
+      margin-top: -18px;
+      margin-bottom: 4px;
       color: var(--ink-2);
       font-size: 13px;
     }
 
-    .last-action { min-width: 0; }
+    .after-actions[data-empty] { visibility: hidden; }
+
+    .after-actions.counting::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      bottom: 2px;
+      width: 220px;
+      height: 2px;
+      background: var(--cut);
+      transform-origin: left;
+      animation: undo-countdown var(--undo-ms, 5000ms) linear forwards;
+    }
+
+    @keyframes undo-countdown {
+      from { transform: scaleX(1); }
+      to { transform: scaleX(0); }
+    }
+
+    .last-action {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .after-actions .text-btn { color: var(--ink); font-weight: 700; }
 
     .text-btn {
       padding: 2px 0;
@@ -689,7 +776,7 @@
       min-width: 0;
       padding: 8px 10px;
       border: 0;
-      border-radius: 4px;
+      border-radius: 9999px;
       background: none;
       text-align: left;
     }
@@ -731,7 +818,7 @@
       height: 30px;
       padding: 0;
       border: 0;
-      border-radius: 4px;
+      border-radius: 50%;
       background: none;
       color: var(--ink-2);
       opacity: 0;
@@ -773,7 +860,7 @@
       width: 100%;
       padding: 10px 14px;
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: 9999px;
       background: var(--surface);
       font-size: 15px;
     }
@@ -849,7 +936,7 @@
     .kept-folder-badge {
       margin-top: 4px;
       padding: 1px 8px;
-      border-radius: 4px;
+      border-radius: 9999px;
       background: var(--slot);
       color: var(--ink-2);
       font-size: 12px;
@@ -869,7 +956,7 @@
       align-items: center;
       gap: 6px;
       padding: 4px 8px;
-      border-radius: 4px;
+      border-radius: 9999px;
       color: var(--ink-2);
       font-size: 13px;
       text-decoration: none;
@@ -897,7 +984,7 @@
       margin-top: 16px;
       padding: 12px;
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: 9999px;
       background: var(--surface);
       font-weight: 700;
     }
@@ -922,11 +1009,11 @@
 
     .toast {
       padding: 10px 16px;
-      border-radius: 6px;
+      border-radius: 8px;
       background: var(--ink);
       color: var(--on-strong);
       font-size: 14px;
-      box-shadow: 0 8px 24px rgba(10, 20, 22, 0.25);
+      box-shadow: 0 8px 24px rgba(15, 20, 25, 0.2);
       cursor: pointer;
       overflow-wrap: anywhere;
     }
@@ -934,9 +1021,6 @@
     .toast-success { background: var(--save); color: #fff; }
     .toast-error { background: var(--cut); color: #fff; }
 
-    @media (prefers-color-scheme: dark) {
-      .toast-error { color: #1d1210; }
-    }
 
     .modal-backdrop {
       position: fixed;
@@ -946,15 +1030,15 @@
       align-items: center;
       justify-content: center;
       padding: 16px;
-      background: rgba(12, 20, 22, 0.5);
+      background: rgba(91, 112, 131, 0.4);
     }
 
     .modal {
       width: min(420px, 100%);
       padding: 22px;
-      border-radius: 6px;
+      border-radius: 16px;
       background: var(--surface);
-      box-shadow: 0 16px 40px rgba(10, 20, 22, 0.3);
+      box-shadow: 0 16px 40px rgba(15, 20, 25, 0.25);
     }
 
     .modal-message {
@@ -972,7 +1056,7 @@
     .modal-btn {
       padding: 8px 16px;
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: 9999px;
       background: none;
       font-size: 14px;
       font-weight: 700;
@@ -986,19 +1070,23 @@
 
     /* ---------- 狭い画面 ---------- */
 
+    /* 横幅が足りないときは振り分けパネルをポストの下に回す */
+    @media (max-width: 860px) {
+      .sort-layout { grid-template-columns: 1fr; }
+      .dock { position: static; max-height: none; margin: 12px -4px -4px; }
+      .rack { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
     @media (max-width: 720px) {
       #app { padding: 14px 14px 32px; }
       .header-actions { margin-left: 0; }
       .card { padding: 18px 16px 20px; }
       .text { font-size: 16px; }
-      .actions { grid-template-columns: 1fr 1fr; }
-      .action-btn.keep { grid-column: 1 / -1; grid-row: 1; }
       .kept-layout { grid-template-columns: 1fr; gap: 16px; }
       .folder-pane { position: static; }
       .kept-row { flex-direction: column; gap: 10px; }
       .kept-edit { width: 100%; flex-direction: row-reverse; justify-content: space-between; align-items: center; }
-      .dock { position: static; }
-      .rack { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -1019,6 +1107,32 @@
       </nav>
       <div class="header-actions">
         <button type="button" id="unbookmark-failed-btn" class="warn-btn" hidden title="Twitter 側のブックマーク解除に失敗したポストをもう一度解除します"></button>
+        <details class="data-menu" id="theme-menu">
+          <summary>表示</summary>
+          <fieldset class="menu-panel theme-panel">
+            <legend class="theme-legend">テーマ</legend>
+            <label class="theme-option">
+              <input type="radio" name="theme" value="auto" checked />
+              <span class="theme-swatch swatch-auto" aria-hidden="true">Aa</span>
+              <span>自動<small>端末の設定に合わせる</small></span>
+            </label>
+            <label class="theme-option">
+              <input type="radio" name="theme" value="light" />
+              <span class="theme-swatch swatch-light" aria-hidden="true">Aa</span>
+              <span>ライト</span>
+            </label>
+            <label class="theme-option">
+              <input type="radio" name="theme" value="dim" />
+              <span class="theme-swatch swatch-dim" aria-hidden="true">Aa</span>
+              <span>ダークブルー<small>暗い画面ならおすすめ</small></span>
+            </label>
+            <label class="theme-option">
+              <input type="radio" name="theme" value="black" />
+              <span class="theme-swatch swatch-black" aria-hidden="true">Aa</span>
+              <span>ブラック</span>
+            </label>
+          </fieldset>
+        </details>
         <details class="data-menu" id="data-menu">
           <summary>データ</summary>
           <div class="menu-panel">
@@ -1034,7 +1148,12 @@
     <div class="progress-bar" aria-hidden="true"><i id="progress-fill"></i></div>
 
     <main>
-      <section id="sort-view" aria-label="選別">
+      <section id="sort-view" class="sort-layout" aria-label="選別">
+        <div class="after-actions" data-empty>
+          <span class="last-action" id="last-action" aria-live="polite"></span>
+          <button type="button" id="btn-undo" class="text-btn" hidden>取り消す（Z）</button>
+        </div>
+
         <article class="card" id="tweet-card">
           <div id="card-empty" class="empty-state" hidden>
             <p class="empty-title" id="empty-title">未整理のポストはありません</p>
@@ -1059,31 +1178,20 @@
           </div>
         </article>
 
-        <div class="dock">
+        <aside class="dock" aria-label="振り分け">
           <div id="sort-actions" hidden>
-            <div class="rack" id="folder-rack" role="group" aria-label="保存先（数字キーで切り替え）">
+            <div class="rack" id="folder-rack" role="group" aria-label="保存先（数字キーで保存）">
               <form id="sort-add-folder-form" class="add-folder-form">
                 <input id="sort-add-folder-input" type="text" maxlength="40" placeholder="＋ フォルダを追加" aria-label="新しいフォルダ名" />
                 <button type="submit">追加</button>
               </form>
             </div>
-            <!-- 保存先の値はこの select が持つ（棚のボタンはこれを書き換える） -->
-            <select id="folder-select" class="visually-hidden" tabindex="-1" aria-hidden="true">
-              <option value="未分類" selected>未分類</option>
-            </select>
-
             <div class="actions">
-              <button type="button" id="btn-discard" class="action-btn discard" title="2回押すと削除します。1回目のあとは Esc でやめられます"><kbd aria-hidden="true">←</kbd><span id="discard-label">削除</span></button>
-              <button type="button" id="btn-skip" class="action-btn skip"><kbd aria-hidden="true">↓</kbd>スキップ</button>
-              <button type="button" id="btn-keep" class="action-btn keep"><span class="keep-label" id="keep-label">未分類に保存</span><kbd aria-hidden="true">→</kbd></button>
+              <button type="button" id="btn-skip" class="action-btn skip"><span class="slot-key" aria-hidden="true">↓</span>スキップ</button>
+              <button type="button" id="btn-discard" class="action-btn discard" title="削除して Twitter のブックマークも解除します。5 秒以内なら Z で解除ごと取り消せます"><span class="slot-key" aria-hidden="true">←</span>削除</button>
             </div>
           </div>
-
-          <div class="after-actions">
-            <span class="last-action" id="last-action" aria-live="polite"></span>
-            <button type="button" id="btn-undo" class="text-btn" hidden>取り消す（Z）</button>
-          </div>
-        </div>
+        </aside>
       </section>
 
       <section id="kept-view" aria-label="保存済み" hidden>

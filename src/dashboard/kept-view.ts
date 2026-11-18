@@ -4,9 +4,9 @@ import type { BookmarkPost } from '../db';
 import { sanitizeFolderName } from '../normalize';
 import { logUnexpected } from '../runtime';
 import { isHttpUrl } from '../urls';
-import { openTweet, saveLastFolder, sendMessage } from './api';
+import { openTweet, sendMessage } from './api';
 import { createIcon, fillAuthor, fillTextWithLinks, renderLinkPreview } from './dom';
-import { adjustFolderCount, loadFolders, populateFolderSelect, sortFolderSelect } from './folders';
+import { adjustFolderCount, loadFolders, populateFolderSelect, renderFolderRack } from './folders';
 import { confirmDialog, showToast } from './notify';
 import { runExclusive, state } from './state';
 
@@ -252,7 +252,7 @@ export async function loadKeptView(): Promise<void> {
   await loadKeptPage(true);
 }
 
-/** 入力欄の名前でフォルダを追加する。selectAfterAdd なら追加したフォルダを開き、選別先にもする */
+/** 入力欄の名前でフォルダを追加する。selectAfterAdd なら保存済み画面で追加したフォルダを開く */
 export async function addFolderFromInput(input: HTMLInputElement | null, selectAfterAdd: boolean): Promise<void> {
   const name = input?.value ?? '';
   const response = await sendMessage({
@@ -269,15 +269,9 @@ export async function addFolderFromInput(input: HTMLInputElement | null, selectA
   if (input) input.value = '';
   const addedName = sanitizeFolderName(name);
   const exists = state.folders.some((folder) => folder.name === addedName);
-  if (exists && selectAfterAdd) {
-    openFolder = addedName;
-    saveLastFolder(addedName);
-  }
+  if (exists && selectAfterAdd) openFolder = addedName;
 
-  const sortSelect = sortFolderSelect();
-  if (sortSelect) {
-    populateFolderSelect(sortSelect, exists && selectAfterAdd ? addedName : sortSelect.value);
-  }
+  renderFolderRack();
   renderFolderList();
   if (state.viewMode === 'kept') await loadKeptPage(true);
 }
@@ -303,13 +297,7 @@ async function removeFolder(name: string): Promise<void> {
   state.folders = response.folders;
   if (openFolder === name) openFolder = DEFAULT_FOLDER;
 
-  const sortSelect = sortFolderSelect();
-  if (sortSelect) {
-    const nextFolder = sortSelect.value === name ? DEFAULT_FOLDER : sortSelect.value;
-    populateFolderSelect(sortSelect, nextFolder);
-    if (nextFolder === DEFAULT_FOLDER) saveLastFolder(DEFAULT_FOLDER);
-  }
-
+  renderFolderRack();
   renderFolderList();
   await loadKeptPage(true);
 }

@@ -151,11 +151,8 @@ describe('ダッシュボード', () => {
     expect(document.getElementById('remaining-count')?.textContent).toBe('3');
   });
 
-  it('数字キーでフォルダを選び、→ でそのフォルダに残して次へ進む', async () => {
+  it('数字キーでそのフォルダに保存して次へ進む', async () => {
     press('2');
-    expect((document.getElementById('folder-select') as HTMLSelectElement).value).toBe('技術');
-
-    press('ArrowRight');
     await vi.waitFor(() => expect(cardText()).toBe('post 2'));
     expect(lastSent('update_bookmark')).toEqual({
       action: 'update_bookmark',
@@ -175,15 +172,25 @@ describe('ダッシュボード', () => {
     });
   });
 
-  it('← は 2 回押しで破棄し、ブックマーク解除を予約する', async () => {
-    press('ArrowLeft');
-    expect(document.getElementById('tweet-card')?.classList.contains('confirm-discard')).toBe(true);
-    expect(lastSent('unbookmark')).toBeUndefined();
-
+  it('← の 1 回で削除し、ブックマーク解除を予約する', async () => {
     press('ArrowLeft');
     await vi.waitFor(() => expect(cardText()).toBe('post 2'));
     expect(lastSent('update_bookmark')?.changes).toEqual({ status: 'discarded' });
     expect(lastSent('unbookmark')).toEqual({ action: 'unbookmark', tweetUrl: 'https://x.com/a/status/3' });
+    expect(document.querySelector('.after-actions')?.classList.contains('counting')).toBe(true);
+  });
+
+  it('棚のフォルダをクリックすると、そのフォルダに保存して次へ進む', async () => {
+    const slot = document.querySelector<HTMLElement>('#folder-rack .slot[data-folder="技術"]');
+    slot?.click();
+    await vi.waitFor(() => expect(cardText()).toBe('post 1'));
+    expect(lastSent('update_bookmark')).toEqual({
+      action: 'update_bookmark',
+      id: '2',
+      changes: { folder: '技術', status: 'kept' }
+    });
+    press('z');
+    await vi.waitFor(() => expect(cardText()).toBe('post 2'));
   });
 
   it('破棄を取り消すと、解除の予約も取り消す', async () => {
@@ -197,7 +204,7 @@ describe('ダッシュボード', () => {
 
   it('保存済みタブに切り替えると、フォルダ一覧と保存済みを読み込む', async () => {
     // 1 件残しておく
-    press('ArrowRight');
+    press('2');
     await vi.waitFor(() => expect(cardText()).toBe('post 2'));
 
     document.getElementById('tab-kept')?.click();
@@ -209,7 +216,7 @@ describe('ダッシュボード', () => {
 
     // 選別のキー操作は保存済みタブでは効かない
     const before = sent.length;
-    press('ArrowRight');
+    press('1');
     expect(sent.length).toBe(before);
   });
 

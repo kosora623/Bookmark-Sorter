@@ -28,7 +28,7 @@ import {
 
 // content 側はボタン探索 10 秒 + 解除確認 6 秒まで待つので、それより長くとる
 const UNBOOKMARK_TIMEOUT_MS = 25_000;
-const UNBOOKMARK_DELAY_MS = 2_000;
+const UNBOOKMARK_DELAY_MS = 5_000;
 const UNBOOKMARK_RETRY_DELAY_MS = 5_000;
 const MAX_UNBOOKMARK_ATTEMPTS = 3;
 const MAX_UNBOOKMARK_FAILURES = 500;
